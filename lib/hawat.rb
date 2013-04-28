@@ -22,29 +22,38 @@ class Hawat
     end
   end
 
-  class AggregateStatistics
+  class Statistics
     def initialize
       @count = 0
-      @duration = 0
+      @total_duration = 0
+      @max_duration = 0
+      @min_duration = 100000000
     end
 
     def update(line_data)
       @count += 1
-      @duration += line_data.total_time
+      dur = line_data.total_time
+      @total_duration += dur
+      @max_duration = dur if dur > @max_duration
+      @min_duration = dur if dur < @max_duration
     end
 
     def result
       {
-        "count"         => @count,
-        "duration_mean" => (@duration.to_f/@count).to_i
+        "count" => @count,
+        "duration" => {
+          "min"  => @min_duration,
+          "mean" => (@duration.to_f/@count).to_i,
+          "max"  => @max_duration
+        }
       }
     end
   end
 
-  class AggregateCollection < Hash
+  class StatisticsCollection < Hash
     def initialize
       super
-      self.default_proc = lambda {|h,k| h[k] = AggregateStatistics.new }
+      self.default_proc = lambda {|h,k| h[k] = Statistics.new }
     end
 
     def result
@@ -59,7 +68,7 @@ class Hawat
 
   class FrontendStatistics
     def initialize
-      @stats = AggregateCollection.new
+      @stats = StatisticsCollection.new
     end
 
     def update(line_data)
@@ -73,7 +82,7 @@ class Hawat
 
   def default_stats
     [
-      NamedAggregate.new("global", AggregateStatistics.new),
+      NamedAggregate.new("global", Statistics.new),
       FrontendStatistics.new
     ]
   end
