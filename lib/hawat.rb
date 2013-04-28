@@ -8,37 +8,72 @@ class Hawat
   # Apr 28 00:00:15 dc1-live-lb1.srv.songkick.net haproxy[32647]: 10.32.75.139:53757 [28/Apr/2013:00:00:15.885] skweb skweb/dc1-live-frontend6_3000 0/0/9/9/20 200 5732 - - ---- 104/39/39/5/0 0/0 \"GET /favicon.ico HTTP/1.1\"\n"
   LINE_RE = /^(\w+ \d+ \d+:\d+:\d+) (\S+) haproxy\[(\d+)\]: ([\d\.]+):(\d+) \[(\d+)\/(\w+)\/(\d+):(\d+:\d+:\d+\.\d+)\] ([^ ]+) ([^ ]+)\/([^ ]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+) (\d+) - - ([\w-]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+)\/(\d+) "(\w+) ([^ ]+)/
 
-  class Count
+  class NamedAggregate
+    def initialize(name, aggregate)
+      @name, @aggregate = name, aggregate
+    end
+  
+    def update(line)
+      @aggregate.update(line)
+    end
+    
+    def result
+      {@name => @aggregate.result}
+    end
+  end
+
+  class AggregateStatistics
     def initialize
       @count = 0
+      @duration = 0
     end
 
     def update(line_data)
       @count += 1
+      @duration += line_data.total_time
     end
 
     def result
-      {"global_count" => @count}
+      {
+        "count"         => @count,
+        "duration_mean" => (@duration.to_f/@count).to_i
+      }
     end
+  end
+
+  class AggregateCollection < Hash
+    def initialize
+      super
+      self.default_proc = lambda {|h,k| h[k] = AggregateStatistics.new }
+    end
+
+    def result
+      h = {}
+      each do |key, agg|
+        h[key] = agg.result
+      end
+      h
+    end
+
   end
 
   class FrontendStatistics
     def initialize
-      @counts = Hash.new {|h,k| h[k] = 0}
+      @stats = AggregateCollection.new
     end
 
     def update(line_data)
-      @counts[line_data.frontend] += 1
+      @stats[line_data.frontend].update(line_data)
     end
 
     def result
-      {"frontend_statistics" => @counts}
+      {"frontends" => @stats.result}
     end
   end
 
   def default_stats
     [
-      Count.new, 
+      NamedAggregate.new("global", AggregateStatistics.new),
       FrontendStatistics.new
     ]
   end
@@ -79,11 +114,11 @@ class Hawat
     def frontend; md[10]; end
     def backend; md[11]; end
     def server; md[12]; end
-    def tq; md[13]; end
-    def tw; md[14]; end
-    def tc; md[15]; end
-    def tr; md[16]; end
-    def tt; md[17]; end
+    def tq; md[13].to_i; end
+    def tw; md[14].to_i; end
+    def tc; md[15].to_i; end
+    def tr; md[16].to_i; end
+    def total_time; md[17].to_i; end
     def status; md[18]; end
     def bytes; md[19]; end
     def termination_state; md[20]; end
