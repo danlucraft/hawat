@@ -38,8 +38,8 @@ class Hawat
   end
 
   class TimeBucketer
-    def initialize(bucket_lenth_in_seconds)
-      @bucket_length = bucket_lenth_in_seconds
+    def initialize(bucket_length_in_seconds)
+      @bucket_length = bucket_length_in_seconds
     end
 
     def update(line)
@@ -114,23 +114,20 @@ class Hawat
       @stats[line_data.frontend].update(line_data)
     end
 
-    def stats
+    def result
       h = {}
       @stats.each do |key, agg|
         h[key] = agg.result
       end
       h
     end
-
-    def result
-      {"frontends" => stats}
-    end
   end
 
   def default_stats
     [
       NamedAggregate.new("global", Aggregate.new),
-      FrontendStatistics.new { Aggregate.new }
+      NamedAggregate.new("global", TimeBucketer.new(600, Aggregate.new),
+      NamedAggregate.new("frontends", FrontendStatistics.new { Aggregate.new })
     ]
   end
 
