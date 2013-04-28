@@ -4,7 +4,6 @@ class Hawat
     @log_path = log_path
   end
 
-
   class NamedAggregate
     def initialize(name, aggregate)
       @name, @aggregate = name, aggregate
@@ -35,6 +34,20 @@ class Hawat
         "stats" => @stats.result,
         "concurrency" => @conc.result
       }
+    end
+  end
+
+  class TimeBucketer
+    def initialize(bucket_lenth_in_seconds)
+      @bucket_length = bucket_lenth_in_seconds
+    end
+
+    def update(line)
+      acc_s = line.accepted.to_i
+      p acc_s.beginning_of_day
+    end
+
+    def result
     end
   end
 
@@ -92,39 +105,32 @@ class Hawat
     end
   end
 
-  class StatisticsCollection < Hash
-    def initialize
-      super
-      self.default_proc = lambda {|h,k| h[k] = Aggregate.new }
-    end
-
-    def result
-      h = {}
-      each do |key, agg|
-        h[key] = agg.result
-      end
-      h
-    end
-  end
-
   class FrontendStatistics
     def initialize
-      @stats = StatisticsCollection.new
+      @stats = Hash.new {|h,k| h[k] = yield }
     end
 
     def update(line_data)
       @stats[line_data.frontend].update(line_data)
     end
 
+    def stats
+      h = {}
+      @stats.each do |key, agg|
+        h[key] = agg.result
+      end
+      h
+    end
+
     def result
-      {"frontends" => @stats.result}
+      {"frontends" => stats}
     end
   end
 
   def default_stats
     [
       NamedAggregate.new("global", Aggregate.new),
-      FrontendStatistics.new
+      FrontendStatistics.new { Aggregate.new }
     ]
   end
 
