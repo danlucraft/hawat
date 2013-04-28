@@ -18,24 +18,46 @@ class Hawat
     end
 
     def result
-      @count
+      {"global_count" => @count}
     end
   end
 
+  class FrontendStatistics
+    def initialize
+      @counts = Hash.new {|h,k| h[k] = 0}
+    end
+
+    def update(line_data)
+      @counts[line_data.frontend] += 1
+    end
+
+    def result
+      {"frontend_statistics" => @counts}
+    end
+  end
+
+  def default_stats
+    [
+      Count.new, 
+      FrontendStatistics.new
+    ]
+  end
+
   def statistics
-    count = Count.new
+    stats = default_stats
+
     line_data = LineData.new
     File.open(@log_path) do |file|
       while line = file.gets
         if md = LINE_RE.match(line)
           line_data.md = md
-          count.update(line_data)
+          stats.each {|s| s.update(line_data) }
         else
           $stderr.puts "LINE DIDN'T MATCH: #{line}"
         end
       end
     end
-    {:requests => count.result}
+    stats.map(&:result).inject(&:merge)
   end
 
   class LineData
