@@ -8,20 +8,34 @@ class Hawat
   # Apr 28 00:00:15 dc1-live-lb1.srv.songkick.net haproxy[32647]: 10.32.75.139:53757 [28/Apr/2013:00:00:15.885] skweb skweb/dc1-live-frontend6_3000 0/0/9/9/20 200 5732 - - ---- 104/39/39/5/0 0/0 \"GET /favicon.ico HTTP/1.1\"\n"
   LINE_RE = /^(\w+ \d+ \d+:\d+:\d+) (\S+) haproxy\[(\d+)\]: ([\d\.]+):(\d+) \[(\d+)\/(\w+)\/(\d+):(\d+:\d+:\d+\.\d+)\] ([^ ]+) ([^ ]+)\/([^ ]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+) (\d+) - - ([\w-]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+)\/(\d+) "(\w+) ([^ ]+)/
 
+  class Count
+    def initialize
+      @count = 0
+    end
+
+    def update(line_data)
+      @count += 1
+    end
+
+    def result
+      @count
+    end
+  end
+
   def statistics
-    count = 0
+    count = Count.new
     line_data = LineData.new
     File.open(@log_path) do |file|
       while line = file.gets
-        count += 1
         if md = LINE_RE.match(line)
           line_data.md = md
+          count.update(line_data)
         else
           $stderr.puts "LINE DIDN'T MATCH: #{line}"
         end
       end
     end
-    {:requests => count}
+    {:requests => count.result}
   end
 
   class LineData
@@ -57,3 +71,4 @@ class Hawat
     def path; md[29]; end
   end
 end
+
