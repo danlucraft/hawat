@@ -43,19 +43,24 @@ class Hawat
     ]
   end
 
-  def statistics
-    stats = default_stats
-
+  def each_line
     line_data = LineData.new
     File.open(@log_path) do |file|
       while line = file.gets
         if md = LINE_RE.match(line)
           line_data.md = md
-          stats.each {|s| s.update(line_data) }
+          yield line_data
         else
           $stderr.puts "LINE DIDN'T MATCH: #{line}"
         end
       end
+    end
+  end
+
+  def statistics
+    stats = default_stats
+    each_line do |line|
+      stats.each {|s| s.update(line) }
     end
     stats.map(&:result).inject(&:merge)
   end
