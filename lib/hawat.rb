@@ -71,6 +71,8 @@ class Hawat
   end
 
   class Statistics
+    attr_reader :count, :total_duration, :max_duration, :min_duration, :errors
+
     def initialize
       @count = 0
       @total_duration = 0
@@ -88,40 +90,58 @@ class Hawat
       @errors += 1 if line_data.status =~ /^(4|5)/ and line_data.status != "404"
     end
 
+    def merge(other)
+      @count          += other.count
+      @total_duration += other.total_duration
+      @errors         += other.errors
+
+      @max_duration = other.max_duration if other.max_duration > @max_duration
+      @min_duration = other.min_duration if other.min_duration < @min_duration
+    end
+
     def result
-      {
-        "count" => @count,
-        "errors" => @errors,
-        "duration" => {
-          "min"  => @min_duration,
-          "mean" => (@total_duration.to_f/@count).to_i,
-          "max"  => @max_duration
+      if @count == 0
+        {
+          "count" => 0,
         }
-      }
+      else
+        {
+          "count" => @count,
+          "errors" => @errors,
+          "duration" => {
+            "min"  => @min_duration,
+            "mean" => (@total_duration.to_f/@count).to_i,
+            "max"  => @max_duration
+          }
+        }
+      end
     end
   end
 
   class PathStats
     class Node
-      attr_reader :count, :children
+      attr_reader :count, :children, :terminal
 
-      def initialize
+      def initialize(terminal_generator)
         @children = {}
         @count = 0
+        @terminal_generator = terminal_generator
+        @terminal = terminal_generator[]
       end
 
-      def add(path)
+      def add(path, line)
         @count += 1
+        @terminal.update(line)
         bits = path.split("/")
         if bits.length > 1
           name = bits[1]
-          node = (@children[name] ||= Node.new)
-          node.add("/" + bits[2..-1].join("/"))
+          node = (@children[name] ||= Node.new(@terminal_generator))
+          node.add("/" + bits[2..-1].join("/"), line)
         end
       end
 
       def reduce
-        #new_children = {"*" => Node.new}
+        #new_children = {"*" => Node.new(@terminal_generator) }
         #@children.each do |slug, node|
           #if node.count < @count/19
             #new_children["*"].merge(node)
@@ -135,12 +155,13 @@ class Hawat
         #@children = new_children
         
         if @children.length > 15
-          new_children = {"*" => Node.new}
+          new_children = {"*" => Node.new(@terminal_generator) }
           @children.each do |slug, node|
             new_children["*"].merge(node)
           end
           @children = new_children
         end
+
         @children.each {|slug, node| node.reduce }
       end
 
@@ -150,6 +171,7 @@ class Hawat
           @children[slug] ||= node
           @children[slug].merge(node)
         end
+        @terminal.merge(other.terminal)
       end
 
       def inspect(indent=0, s="")
@@ -159,21 +181,36 @@ class Hawat
         end
         s
       end
+
+      def collect(path, out)
+        @children.each do |slug, node|
+          node.collect(path + "/" + slug, out)
+        end
+        out[path] = terminal.result
+      end
     end
 
-    def initialize
-      @node = Node.new
+    def initialize(&terminal_generator)
+      @nodes = {}
+      @terminal_generator = terminal_generator
     end
 
     def update(line)
-      @node.add(line.path.split("?").first)
+      node = (@nodes[line.http_method] ||= Node.new(@terminal_generator))
+      node.add(line.path.split("?").first, line)
     end
 
     def result
-      @node.reduce
-      p @node
-      {"asdf" => 123}
+      @nodes.values.each {|node| node.children.each {|slug, node| node.reduce } }
+      result = {}
+      @nodes.each do |method, node|
+        r = {}
+        node.collect("", r)
+        result[method] = r
+      end
+      result
     end
+
   end
 
   class Concurrency
@@ -203,7 +240,7 @@ class Hawat
   class FrontendStatistics
     def initialize
       @stats = Hash.new {|h,k| h[k] = yield }
-      @path_stats = Hash.new { |h,k| h[k] = PathStats.new }
+      @path_stats = Hash.new { |h,k| h[k] = PathStats.new { Statistics.new } }
     end
 
     def update(line_data)
