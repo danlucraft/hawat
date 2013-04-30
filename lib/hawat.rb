@@ -38,16 +38,35 @@ class Hawat
   end
 
   class TimeBucketer
-    def initialize(bucket_length_in_seconds)
+    def initialize(bucket_length_in_seconds, &block)
       @bucket_length = bucket_length_in_seconds
+      @buckets = []
+      @aggregate_generator = block
+    end
+
+    class Bucket < Struct.new(:start, :finish, :aggregate)
     end
 
     def update(line)
-      acc_s = line.accepted.to_i
-      p acc_s.beginning_of_day
+      close = line.closed
+      @beginning_of_day ||= Time.local(close.year, close.mon, close.day, 0, 0, 0)
+      close_s = close.to_i
+      close_s_today = close_s - @beginning_of_day.to_i
+      bucket_i = close_s_today/@bucket_length
+      @buckets[bucket_i] ||= Bucket.new(@beginning_of_day + bucket_i*@bucket_length,
+                                        @beginning_of_day + bucket_i*@bucket_length,
+                                        @aggregate_generator.call)
+      @buckets[bucket_i].aggregate.update(line)
     end
 
     def result
+      h = {}
+      @buckets.each do |b|
+        if b
+          h[b.start] = b.aggregate.result
+        end
+      end
+      h
     end
   end
 
@@ -82,6 +101,81 @@ class Hawat
     end
   end
 
+  class PathStats
+    class Node
+      attr_reader :count, :children
+
+      def initialize
+        @children = {}
+        @count = 0
+      end
+
+      def add(path)
+        @count += 1
+        bits = path.split("/")
+        if bits.length > 1
+          name = bits[1]
+          node = (@children[name] ||= Node.new)
+          node.add("/" + bits[2..-1].join("/"))
+        end
+      end
+
+      def reduce
+        #new_children = {"*" => Node.new}
+        #@children.each do |slug, node|
+          #if node.count < @count/19
+            #new_children["*"].merge(node)
+          #else
+            #new_children[slug] = node
+          #end
+        #end
+        #unless new_children["*"].count > 0
+          #new_children.delete("*")
+        #end
+        #@children = new_children
+        
+        if @children.length > 15
+          new_children = {"*" => Node.new}
+          @children.each do |slug, node|
+            new_children["*"].merge(node)
+          end
+          @children = new_children
+        end
+        @children.each {|slug, node| node.reduce }
+      end
+
+      def merge(other)
+        @count += other.count
+        other.children.each do |slug, node|
+          @children[slug] ||= node
+          @children[slug].merge(node)
+        end
+      end
+
+      def inspect(indent=0, s="")
+        @children.each do |slug, node|
+          s << " "*indent + "/#{slug} (#{node.count})\n"
+          node.inspect(indent + 2, s)
+        end
+        s
+      end
+    end
+
+    def initialize
+      @node = Node.new
+    end
+
+    def update(line)
+      @node.add(line.path.split("?").first)
+    end
+
+    def result
+      @node.reduce
+      p @node
+      {"asdf" => 123}
+    end
+  end
+
   class Concurrency
     def initialize
       @max_concurrency = 0
@@ -90,17 +184,18 @@ class Hawat
 
     def update(line)
       acc_s = line.accepted.to_r
-      dur_s = Rational(line.total_time, 1000)
-      close = acc_s + dur_s
-      @live_requests.reject! {|l| l < close }
-      @live_requests << close
+      close_s = line.closed.to_r
+      @live_requests.reject! {|l| l > close_s }
+      @live_requests << acc_s
       conc = @live_requests.length
-      @max_concurrency = conc if conc > @max_concurrency
+      if conc > @max_concurrency
+        @max_concurrency = conc 
+      end
     end
 
     def result
       {
-        "max_concurrency" => @max_concurrency
+        "max" => @max_concurrency
       }
     end
   end
@@ -108,16 +203,23 @@ class Hawat
   class FrontendStatistics
     def initialize
       @stats = Hash.new {|h,k| h[k] = yield }
+      @path_stats = Hash.new { |h,k| h[k] = PathStats.new }
     end
 
     def update(line_data)
       @stats[line_data.frontend].update(line_data)
+      @path_stats[line_data.frontend].update(line_data)
     end
 
     def result
       h = {}
       @stats.each do |key, agg|
-        h[key] = agg.result
+        h[key] ||= {}
+        h[key]["stats"] = agg.result
+      end
+      @path_stats.each do |key, agg|
+        h[key] ||= {}
+        h[key]["pathStats"] = agg.result
       end
       h
     end
@@ -126,7 +228,7 @@ class Hawat
   def default_stats
     [
       NamedAggregate.new("global", Aggregate.new),
-      NamedAggregate.new("global", TimeBucketer.new(600, Aggregate.new),
+      NamedAggregate.new("global_series", TimeBucketer.new(5) { Aggregate.new }),
       NamedAggregate.new("frontends", FrontendStatistics.new { Aggregate.new })
     ]
   end
@@ -173,6 +275,11 @@ class Hawat
     def accepted
       hour, minute, sec, milli = *timestamp.split(/:|\./)
       Time.local(year.to_i, month, day.to_i, hour.to_i, minute.to_i, sec.to_i, milli.to_i*1000)
+    end
+
+    def closed
+      dur_s = Rational(total_time, 1000)
+      Time.at(accepted.to_r + dur_s)
     end
 
     def frontend; md[10]; end
