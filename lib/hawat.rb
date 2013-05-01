@@ -33,25 +33,6 @@ class Hawat
     end
   end
 
-  class DefaultAggregate < Aggregate
-    def initialize
-      @stats = Statistics.new
-      @conc = Concurrency.new
-    end
-
-    def update(line)
-      @stats.update(line)
-      @conc.update(line)
-    end
-    
-    def collect
-      {
-        "stats" => @stats.collect,
-        "concurrency" => @conc.collect
-      }
-    end
-  end
-
   class TimeBucketer < Aggregate
     def initialize(bucket_length_in_seconds, &block)
       @bucket_length = bucket_length_in_seconds
@@ -277,10 +258,14 @@ class Hawat
     end
   end
 
+  def default_aggregate
+    NamedAggregate.new("stats" => Statistics.new, "conc" => Concurrency.new)
+  end
+
   def default_stats
-    NamedAggregate.new("global" => DefaultAggregate.new,
-                       "global_series" => TimeBucketer.new(5) { DefaultAggregate.new },
-                       "frontends" => FrontendStatistics.new { DefaultAggregate.new })
+    NamedAggregate.new("global"        => default_aggregate,
+                       "global_series" => TimeBucketer.new(5) { default_aggregate },
+                       "frontends"     => FrontendStatistics.new { default_aggregate })
   end
 
   def each_line
