@@ -33,6 +33,35 @@ class Hawat
     end
   end
 
+  class MethodAggregate < Aggregate
+    attr_reader :methods
+
+    def initialize(&terminal_generator)
+      @terminal_generator = terminal_generator
+      @methods = {}
+    end
+
+    def update(line)
+      terminal = (@methods[line.http_method] ||= @terminal_generator[])
+      terminal.update(line)
+    end
+
+    def merge(other)
+      other.methods.each do |method, node|
+        @methods[method] ||= @terminal_generator[]
+        @methods[method].merge(node)
+      end
+    end
+
+    def collect
+      h = {}
+      @methods.each do |name, terminal|
+        h[name] = terminal.collect
+      end
+      h
+    end
+  end
+
   class TimeBucketer < Aggregate
     def initialize(bucket_length_in_seconds, &block)
       @bucket_length = bucket_length_in_seconds
@@ -122,7 +151,7 @@ class Hawat
         @children = {}
         @count = 0
         @terminal_generator = terminal_generator
-        @terminal = terminal_generator[]
+        @terminal = terminal_generator.call
       end
 
       def add(path, line)
@@ -187,26 +216,19 @@ class Hawat
     end
 
     def initialize(&terminal_generator)
-      @nodes = {}
-      @terminal_generator = terminal_generator
+      @node = PathNode.new(terminal_generator)
     end
 
     def update(line)
-      node = (@nodes[line.http_method] ||= PathNode.new(@terminal_generator))
-      node.add(line.path.split("?").first, line)
+      @node.add(line.path.split("?").first, line)
     end
 
     def collect
-      @nodes.values.each {|node| node.children.each {|slug, node| node.reduce } }
-      result = {}
-      @nodes.each do |method, node|
-        r = {}
-        node.collect("", r)
-        result[method] = r
-      end
-      result
+      r = {}
+      @node.children.each {|slug, node| node.reduce }
+      @node.collect("", r)
+      r
     end
-
   end
 
   class Concurrency < Terminal
@@ -236,7 +258,7 @@ class Hawat
   class FrontendStatistics < Aggregate
     def initialize
       @stats = Hash.new {|h,k| h[k] = yield }
-      @path_stats = Hash.new { |h,k| h[k] = PathStats.new { Statistics.new } }
+      @path_stats = Hash.new { |h,k| h[k] = PathStats.new { MethodAggregate.new { Statistics.new } } }
     end
 
     def update(line_data)
@@ -248,7 +270,7 @@ class Hawat
       h = {}
       @stats.each do |key, agg|
         h[key] ||= {}
-        h[key]["stats"] = agg.collect
+        h[key].merge!(agg.collect)
       end
       @path_stats.each do |key, agg|
         h[key] ||= {}
