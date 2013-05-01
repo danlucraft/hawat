@@ -256,38 +256,39 @@ class Hawat
   end
 
   class FrontendStatistics < Aggregate
-    def initialize
-      @stats = Hash.new {|h,k| h[k] = yield }
-      @path_stats = Hash.new { |h,k| h[k] = PathStats.new { MethodAggregate.new { Statistics.new } } }
+    def initialize(&node_generator)
+      @node_generator = node_generator
+      @aggregates = {}
     end
 
     def update(line_data)
-      @stats[line_data.frontend].update(line_data)
-      @path_stats[line_data.frontend].update(line_data)
+      node = (@aggregates[line_data.frontend] ||= @node_generator[])
+      node.update(line_data)
     end
 
     def collect
       h = {}
-      @stats.each do |key, agg|
-        h[key] ||= {}
-        h[key].merge!(agg.collect)
-      end
-      @path_stats.each do |key, agg|
-        h[key] ||= {}
-        h[key]["pathStats"] = agg.collect
+      @aggregates.each do |frontend, node|
+        h[frontend] = node.collect
       end
       h
     end
   end
 
   def default_aggregate
-    NamedAggregate.new("stats" => Statistics.new, "conc" => Concurrency.new)
+    {"stats" => Statistics.new, "conc" => Concurrency.new}
   end
 
   def default_stats
-    NamedAggregate.new("global"        => default_aggregate,
-                       "global_series" => TimeBucketer.new(5) { default_aggregate },
-                       "frontends"     => FrontendStatistics.new { default_aggregate })
+    frontends = FrontendStatistics.new do
+      NamedAggregate.new(
+        default_aggregate.merge(
+          "paths" => PathStats.new { MethodAggregate.new { Statistics.new } } ))
+    end
+    NamedAggregate.new(
+      "global"        => NamedAggregate.new(default_aggregate),
+      "global_series" => TimeBucketer.new(5) { NamedAggregate.new(default_aggregate) },
+      "frontends"     => frontends)
   end
 
   def each_line
