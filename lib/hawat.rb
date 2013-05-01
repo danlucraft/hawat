@@ -4,16 +4,9 @@ class Hawat
     @log_path = log_path
   end
 
-  class Node
-  end
+  class NamedAggregate
+    attr_reader :nodes
 
-  class Terminal < Node
-  end
-
-  class Aggregate < Node
-  end
-
-  class NamedAggregate < Aggregate
     def initialize(nodes)
       @nodes = nodes
     end
@@ -23,7 +16,17 @@ class Hawat
         node.update(line)
       end
     end
-    
+
+    def merge(other)
+      other.nodes.each do |name, other_node|
+        if node = @nodes[name]
+          node.merge(other_node)
+        else
+          @nodes[name] = other_node
+        end
+      end
+    end
+
     def collect
       h = {}
       @nodes.each do |name, node|
@@ -33,7 +36,7 @@ class Hawat
     end
   end
 
-  class MethodAggregate < Aggregate
+  class MethodAggregate
     attr_reader :methods
 
     def initialize(&terminal_generator)
@@ -62,7 +65,9 @@ class Hawat
     end
   end
 
-  class TimeBucketer < Aggregate
+  class TimeBucketerAggregate
+    attr_reader :bucket_length, :buckets
+
     def initialize(bucket_length_in_seconds, &block)
       @bucket_length = bucket_length_in_seconds
       @buckets = []
@@ -70,6 +75,12 @@ class Hawat
     end
 
     class Bucket < Struct.new(:start, :finish, :aggregate)
+      def merge(other)
+        raise if start != other.start
+        raise if finish != other.finish
+        raise if aggregate.class != other.aggregate.class
+        aggregate.merge(other.aggregate)
+      end
     end
 
     def update(line)
@@ -84,6 +95,18 @@ class Hawat
       @buckets[bucket_i].aggregate.update(line)
     end
 
+    def merge(other)
+      raise unless bucket_length == other.bucket_length
+      other.buckets.each_with_index do |other_bucket, i|
+        next unless other_bucket
+        if bucket = @buckets[i]
+          bucket.merge(other_bucket)
+        else
+          @buckets[i] = other_bucket
+        end
+      end
+    end
+
     def collect
       h = {}
       @buckets.each do |b|
@@ -95,7 +118,7 @@ class Hawat
     end
   end
 
-  class Statistics < Terminal
+  class StatisticsTerminal
     attr_reader :count, :total_duration, :max_duration, :min_duration, :statuses
 
     def initialize
@@ -143,7 +166,7 @@ class Hawat
     end
   end
 
-  class PathStats < Aggregate
+  class PathStatsAggregate
     class PathNode
       attr_reader :count, :children, :terminal
 
@@ -231,7 +254,7 @@ class Hawat
     end
   end
 
-  class Concurrency < Terminal
+  class ConcurrencyTerminal
     def initialize
       @max_concurrency = 0
       @live_requests = []
@@ -255,7 +278,7 @@ class Hawat
     end
   end
 
-  class FrontendStatistics < Aggregate
+  class FrontendAggregate
     def initialize(&node_generator)
       @node_generator = node_generator
       @aggregates = {}
@@ -276,18 +299,23 @@ class Hawat
   end
 
   def default_aggregate
-    {"stats" => Statistics.new, "conc" => Concurrency.new}
+    {"stats" => StatisticsTerminal.new, "conc" => ConcurrencyTerminal.new}
   end
 
   def default_stats
-    frontends = FrontendStatistics.new do
+    frontends = FrontendAggregate.new do
       NamedAggregate.new(
-        default_aggregate.merge(
-          "paths" => PathStats.new { MethodAggregate.new { Statistics.new } } ))
+        "global" => NamedAggregate.new(default_aggregate),
+        "global_series" => TimeBucketerAggregate.new(5) { NamedAggregate.new(default_aggregate) },
+        "paths" => PathStatsAggregate.new { 
+          NamedAggregate.new(
+            "all" => MethodAggregate.new { StatisticsTerminal.new },
+            "series" => MethodAggregate.new { TimeBucketerAggregate.new(5) { StatisticsTerminal.new } })
+        })
     end
     NamedAggregate.new(
       "global"        => NamedAggregate.new(default_aggregate),
-      "global_series" => TimeBucketer.new(5) { NamedAggregate.new(default_aggregate) },
+      "global_series" => TimeBucketerAggregate.new(5) { NamedAggregate.new(default_aggregate) },
       "frontends"     => frontends)
   end
 
