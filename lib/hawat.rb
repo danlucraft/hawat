@@ -71,14 +71,14 @@ class Hawat
   end
 
   class Statistics
-    attr_reader :count, :total_duration, :max_duration, :min_duration, :errors
+    attr_reader :count, :total_duration, :max_duration, :min_duration, :statuses
 
     def initialize
-      @count = 0
+      @count          = 0
       @total_duration = 0
-      @max_duration = 0
-      @min_duration = 100000000
-      @errors = 0
+      @max_duration   = 0
+      @min_duration   = 100000000
+      @statuses       = Hash.new {|h,k| h[k] = 0}
     end
 
     def update(line_data)
@@ -87,13 +87,13 @@ class Hawat
       @total_duration += dur
       @max_duration = dur if dur > @max_duration
       @min_duration = dur if dur < @max_duration
-      @errors += 1 if line_data.status =~ /^(4|5)/ and line_data.status != "404"
+      @statuses[line_data.status] += 1
     end
 
     def merge(other)
       @count          += other.count
       @total_duration += other.total_duration
-      @errors         += other.errors
+      @statuses        = @statuses.merge(other.statuses)
 
       @max_duration = other.max_duration if other.max_duration > @max_duration
       @min_duration = other.min_duration if other.min_duration < @min_duration
@@ -107,7 +107,7 @@ class Hawat
       else
         {
           "count" => @count,
-          "errors" => @errors,
+          "status" => @statuses,
           "duration" => {
             "min"  => @min_duration,
             "mean" => (@total_duration.to_f/@count).to_i,
