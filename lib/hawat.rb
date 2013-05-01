@@ -4,21 +4,36 @@ class Hawat
     @log_path = log_path
   end
 
-  class NamedAggregate
-    def initialize(name, aggregate)
-      @name, @aggregate = name, aggregate
+  class Node
+  end
+
+  class Terminal < Node
+  end
+
+  class Aggregate < Node
+  end
+
+  class NamedAggregate < Aggregate
+    def initialize(nodes)
+      @nodes = nodes
     end
   
     def update(line)
-      @aggregate.update(line)
+      @nodes.each do |_, node|
+        node.update(line)
+      end
     end
     
-    def result
-      {@name => @aggregate.result}
+    def collect
+      h = {}
+      @nodes.each do |name, node|
+        h[name] = node.collect
+      end
+      h
     end
   end
 
-  class Aggregate
+  class DefaultAggregate < Aggregate
     def initialize
       @stats = Statistics.new
       @conc = Concurrency.new
@@ -29,15 +44,15 @@ class Hawat
       @conc.update(line)
     end
     
-    def result
+    def collect
       {
-        "stats" => @stats.result,
-        "concurrency" => @conc.result
+        "stats" => @stats.collect,
+        "concurrency" => @conc.collect
       }
     end
   end
 
-  class TimeBucketer
+  class TimeBucketer < Aggregate
     def initialize(bucket_length_in_seconds, &block)
       @bucket_length = bucket_length_in_seconds
       @buckets = []
@@ -59,18 +74,18 @@ class Hawat
       @buckets[bucket_i].aggregate.update(line)
     end
 
-    def result
+    def collect
       h = {}
       @buckets.each do |b|
         if b
-          h[b.start] = b.aggregate.result
+          h[b.start] = b.aggregate.collect
         end
       end
       h
     end
   end
 
-  class Statistics
+  class Statistics < Terminal
     attr_reader :count, :total_duration, :max_duration, :min_duration, :statuses
 
     def initialize
@@ -99,7 +114,7 @@ class Hawat
       @min_duration = other.min_duration if other.min_duration < @min_duration
     end
 
-    def result
+    def collect
       if @count == 0
         {
           "count" => 0,
@@ -118,8 +133,8 @@ class Hawat
     end
   end
 
-  class PathStats
-    class Node
+  class PathStats < Aggregate
+    class PathNode
       attr_reader :count, :children, :terminal
 
       def initialize(terminal_generator)
@@ -135,13 +150,13 @@ class Hawat
         bits = path.split("/")
         if bits.length > 1
           name = bits[1]
-          node = (@children[name] ||= Node.new(@terminal_generator))
+          node = (@children[name] ||= PathNode.new(@terminal_generator))
           node.add("/" + bits[2..-1].join("/"), line)
         end
       end
 
       def reduce
-        #new_children = {"*" => Node.new(@terminal_generator) }
+        #new_children = {"*" => PathNode.new(@terminal_generator) }
         #@children.each do |slug, node|
           #if node.count < @count/19
             #new_children["*"].merge(node)
@@ -155,7 +170,7 @@ class Hawat
         #@children = new_children
         
         if @children.length > 15
-          new_children = {"*" => Node.new(@terminal_generator) }
+          new_children = {"*" => PathNode.new(@terminal_generator) }
           @children.each do |slug, node|
             new_children["*"].merge(node)
           end
@@ -186,7 +201,7 @@ class Hawat
         @children.each do |slug, node|
           node.collect(path + "/" + slug, out)
         end
-        out[path] = terminal.result
+        out[path] = terminal.collect
       end
     end
 
@@ -196,11 +211,11 @@ class Hawat
     end
 
     def update(line)
-      node = (@nodes[line.http_method] ||= Node.new(@terminal_generator))
+      node = (@nodes[line.http_method] ||= PathNode.new(@terminal_generator))
       node.add(line.path.split("?").first, line)
     end
 
-    def result
+    def collect
       @nodes.values.each {|node| node.children.each {|slug, node| node.reduce } }
       result = {}
       @nodes.each do |method, node|
@@ -213,7 +228,7 @@ class Hawat
 
   end
 
-  class Concurrency
+  class Concurrency < Terminal
     def initialize
       @max_concurrency = 0
       @live_requests = []
@@ -230,14 +245,14 @@ class Hawat
       end
     end
 
-    def result
+    def collect
       {
         "max" => @max_concurrency
       }
     end
   end
 
-  class FrontendStatistics
+  class FrontendStatistics < Aggregate
     def initialize
       @stats = Hash.new {|h,k| h[k] = yield }
       @path_stats = Hash.new { |h,k| h[k] = PathStats.new { Statistics.new } }
@@ -248,26 +263,24 @@ class Hawat
       @path_stats[line_data.frontend].update(line_data)
     end
 
-    def result
+    def collect
       h = {}
       @stats.each do |key, agg|
         h[key] ||= {}
-        h[key]["stats"] = agg.result
+        h[key]["stats"] = agg.collect
       end
       @path_stats.each do |key, agg|
         h[key] ||= {}
-        h[key]["pathStats"] = agg.result
+        h[key]["pathStats"] = agg.collect
       end
       h
     end
   end
 
   def default_stats
-    [
-      NamedAggregate.new("global", Aggregate.new),
-      NamedAggregate.new("global_series", TimeBucketer.new(5) { Aggregate.new }),
-      NamedAggregate.new("frontends", FrontendStatistics.new { Aggregate.new })
-    ]
+    NamedAggregate.new("global" => DefaultAggregate.new,
+                       "global_series" => TimeBucketer.new(5) { DefaultAggregate.new },
+                       "frontends" => FrontendStatistics.new { DefaultAggregate.new })
   end
 
   def each_line
@@ -287,9 +300,9 @@ class Hawat
   def statistics
     stats = default_stats
     each_line do |line|
-      stats.each {|s| s.update(line) }
+      stats.update(line)
     end
-    stats.map(&:result).inject(&:merge)
+    stats.collect
   end
 
   # example 
