@@ -86,7 +86,7 @@ class Hawat
       dur = line_data.total_time
       @total_duration += dur
       @max_duration = dur if dur > @max_duration
-      @min_duration = dur if dur < @max_duration
+      @min_duration = dur if dur < @min_duration
       @statuses[line_data.status] += 1
     end
 
