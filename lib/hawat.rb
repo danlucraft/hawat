@@ -299,23 +299,24 @@ class Hawat
   end
 
   def default_aggregate
-    {"stats" => StatisticsTerminal.new, "conc" => ConcurrencyTerminal.new}
+    NamedAggregate.new("stats" => StatisticsTerminal.new, "conc" => ConcurrencyTerminal.new)
   end
 
   def default_stats
     frontends = FrontendAggregate.new do
       NamedAggregate.new(
-        "global" => NamedAggregate.new(default_aggregate),
-        "global_series" => TimeBucketerAggregate.new(5) { NamedAggregate.new(default_aggregate) },
+        "global" => default_aggregate,
+        "global_series" => TimeBucketerAggregate.new(5) { default_aggregate },
         "paths" => PathStatsAggregate.new { 
-          NamedAggregate.new(
-            "all" => MethodAggregate.new { StatisticsTerminal.new },
-            "series" => MethodAggregate.new { TimeBucketerAggregate.new(5) { StatisticsTerminal.new } })
+          MethodAggregate.new {
+            NamedAggregate.new(
+              "all" => StatisticsTerminal.new,
+              "series" => TimeBucketerAggregate.new(5) { StatisticsTerminal.new })}
         })
     end
     NamedAggregate.new(
-      "global"        => NamedAggregate.new(default_aggregate),
-      "global_series" => TimeBucketerAggregate.new(5) { NamedAggregate.new(default_aggregate) },
+      "global"        => default_aggregate,
+      "global_series" => TimeBucketerAggregate.new(5) { default_aggregate },
       "frontends"     => frontends)
   end
 
