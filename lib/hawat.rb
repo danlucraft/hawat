@@ -1,4 +1,6 @@
 
+require 'hawat/html'
+
 class Hawat
   def initialize(log_path)
     @log_path = log_path
@@ -149,9 +151,7 @@ class Hawat
 
     def collect
       if @count == 0
-        {
-          "count" => 0,
-        }
+        {"count" => 0}
       else
         {
           "count" => @count,

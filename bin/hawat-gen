@@ -6,8 +6,5 @@ require 'hawat'
 require 'pp'
 require 'json'
 
-stats = Hawat.new(ARGV[0]).statistics
-puts JSON.pretty_generate(stats)
-
-
-
+stats = JSON.parse(File.read(ARGV[0]))
+Hawat::Html.new(stats).generate
