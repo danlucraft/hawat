@@ -74,7 +74,7 @@ class Hawat
         fout << "<tr>"
         l = link[name]
         if l
-          fout << "<td><a href='\##{l}'>#{[*name].join(" ")}</a></td>"
+          fout << "<td><a onclick=\"Hawat.showDataBox('frontend-#{name}')\">#{[*name].join(" ")}</a></td>"
         else
           fout << "<td>#{[*name].join(" ")}</td>"
         end
@@ -99,11 +99,12 @@ class Hawat
       File.open("output.html", "w") do |fout|
         fout << "<h1><a name=top>#{TITLE}</a></h1>"
         fout << "<script type=\"text/javascript\" src=\"https://www.google.com/jsapi\"></script>"
+        fout << "<script src=\"http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js\" type=\"text/javascript\"></script>"
         fout << "<script>#{File.read("views/js.js")}</script>"
         fout << "<style>#{File.read("views/style.css")}</style>"
         fout << "<div id=container>"
 
-        fout << "<div id=global>"
+        fout << "<div class=databox id=global>"
         fout << "<div id=breadcrumbs><h2>All</h2></div>"
         stats_boxes(fout, @stats["global"]["all"])
         stats_time_series(fout, "All frontends", @stats["global"]["series"])
@@ -115,9 +116,9 @@ class Hawat
         fout << "</div>"
 
         @stats["frontends"].each do |name, data|
-          fout << "<a name=\"frontend-#{name}\">"
-          fout << "<div id=breadcrumbs><h2>#{name}</h2></div>"
-          fout << "</a>"
+          fout << "<div class=databox id=\"frontend-#{name}\" style=\"display:none;\">"
+          fout << ""
+          fout << "<div id=breadcrumbs><h2><a onclick=\"Hawat.showDataBox('global')\">top</a> &gt; #{name}</h2></div>"
           stats_boxes(fout, data["global"]["all"])
           stats_time_series(fout, name, data["global"]["series"])
           new_data = {}
