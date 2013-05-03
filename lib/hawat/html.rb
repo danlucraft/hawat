@@ -78,7 +78,7 @@ class Hawat
       sorted_data.each do |name, data|
         data = reach_in[data]
         fout << "<tr>"
-        fout << "<td>#{name}</td>"
+        fout << "<td>#{[*name].join(" ")}</td>"
         fout << "<td>#{data["stats"]["count"]}</td>"
         fout << "<td>#{error_count(data["stats"]["status"])}</td>"
         fout << "<td>#{data["stats"]["duration"]["mean"]}</td>"
@@ -100,26 +100,28 @@ class Hawat
 
         fout << "<div id=global>"
         fout << "<div id=breadcrumbs><h2>All</h2></div>"
-        stats_boxes(fout, global)
-        stats_time_series(fout, @stats["global_series"])
-        table(fout, @stats["frontends"].merge("all" => {"global" => @stats["global"]}), 
-              sort_field: proc {|d| d["global"]["stats"]["count"]}, 
-              reach_in: proc {|d| d["global"] })
+        stats_boxes(fout, @stats["global"]["all"])
+        stats_time_series(fout, @stats["global"]["series"])
+
+        table(fout, @stats["frontends"], 
+              sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
+              reach_in: proc {|d| d["global"]["all"] })
         fout << "</div>"
 
         @stats["frontends"].each do |name, data|
           fout << "<div id=\"frontend-#{name}\">"
           fout << "<div id=breadcrumbs><h2>#{name}</h2></div>"
-          stats_boxes(fout, data["global"])
+          stats_boxes(fout, data["global"]["all"])
           #stats_time_series(fout, @stats["global_series"])
           new_data = {}
           data["paths"].each do |path, methods|
             methods.each do |method, data|
-              new_data["#{method} /#{path}".gsub("//", "/")] = {"stats" => data["all"], "conc" => {"max" => "-"}}
+              new_data[[method, path]] = data
             end
           end
-          table(fout, new_data, #.merge("all" => {"global" => data["global"]}), 
-                sort_field: proc {|d| d["stats"]["count"] })
+          table(fout, new_data,
+                sort_field: proc {|d| d["all"]["stats"]["count"] },
+                reach_in: proc {|d| d["all"] })
           fout << "</div>"
         end
         fout << "</div>"

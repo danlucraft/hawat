@@ -257,6 +257,8 @@ class Hawat
   end
 
   class ConcurrencyTerminal
+    attr_reader :max_concurrency
+
     def initialize
       @max_concurrency = 0
       @live_requests = []
@@ -271,6 +273,10 @@ class Hawat
       if conc > @max_concurrency
         @max_concurrency = conc 
       end
+    end
+
+    def merge(other)
+      @max_concurrency = [other.max_concurrency, @max_concurrency].max
     end
 
     def collect
@@ -307,18 +313,20 @@ class Hawat
   def default_stats
     frontends = FrontendAggregate.new do
       NamedAggregate.new(
-        "global" => default_aggregate,
-        "global_series" => TimeBucketerAggregate.new(5) { default_aggregate },
+        "global" => NamedAggregate.new(
+          "all" => default_aggregate,
+          "series" => TimeBucketerAggregate.new(5) { default_aggregate }),
         "paths" => PathStatsAggregate.new { 
           MethodAggregate.new {
             NamedAggregate.new(
-              "all" => StatisticsTerminal.new,
+              "all" => default_aggregate,
               "series" => TimeBucketerAggregate.new(5) { StatisticsTerminal.new })}
         })
     end
     NamedAggregate.new(
-      "global"        => default_aggregate,
-      "global_series" => TimeBucketerAggregate.new(5) { default_aggregate },
+      "global" => NamedAggregate.new(
+        "all" => default_aggregate,
+        "series" => TimeBucketerAggregate.new(5) { default_aggregate }),
       "frontends"     => frontends)
   end
 
