@@ -78,9 +78,7 @@ class Hawat
 
     class Bucket < Struct.new(:start, :finish, :aggregate)
       def merge(other)
-        raise if start != other.start
-        raise if finish != other.finish
-        raise if aggregate.class != other.aggregate.class
+        raise if start != other.start or finish != other.finish or aggregate.class != other.aggregate.class
         aggregate.merge(other.aggregate)
       end
     end
@@ -174,7 +172,6 @@ class Hawat
         @children = {}
         @count = 0
         @terminal_generator = terminal_generator
-        @terminal = terminal_generator.call
       end
 
       def add(path, line)
@@ -185,8 +182,12 @@ class Hawat
           node = (@children[name] ||= PathNode.new(@terminal_generator))
           node.add("/" + bits[2..-1].join("/"), line)
         else
-          @terminal.update(line)
+          terminal.update(line)
         end
+      end
+
+      def terminal
+        @terminal ||= @terminal_generator.call
       end
 
       def reduce
@@ -220,7 +221,7 @@ class Hawat
           @children[slug] ||= node
           @children[slug].merge(node)
         end
-        @terminal.merge(other.terminal)
+        terminal.merge(other.terminal) if other.terminal
       end
 
       def inspect(indent=0, s="")
