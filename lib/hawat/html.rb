@@ -11,11 +11,15 @@ class Hawat
 
     def stats_boxes(output, stats)
       output << "<div class='stats'>"
-      output <<   "<div><div class='number'>#{stats["stats"]["count"]}</div>Count</div>"
-      output <<   "<div><div class='number'>#{error_count(stats["stats"]["status"])}</div>Errors</div>"
-      output <<   "<div><div class='number'>#{latency(stats["stats"]["duration"]["mean"])}</div>Mean Latency</div>"
-      output <<   "<div><div class='number'>#{latency(stats["stats"]["duration"]["max"])}</div>Max Latency</div>"
-      output <<   "<div><div class='number'>#{stats["conc"]["max"]}</div>Max Conc</div>"
+      [
+        [stats["stats"]["count"], "Count"],
+        [error_count(stats["stats"]["status"]), "Errors"],
+        [latency(stats["stats"]["duration"]["mean"]), "Mean Latency"],
+        [latency(stats["stats"]["duration"]["max"]), "Max Latency"],
+        [stats["conc"]["max"], "Max Conc."]
+      ].each do |value, title|
+        output <<   "<div><div class='number'>#{value}</div>#{title}</div>"
+      end
       output << "</div>"
     end
 
@@ -35,40 +39,29 @@ class Hawat
       @chart_i ||= 0
       @chart_i += 1
       output << <<-HTML
-    <script type="text/javascript">
-      // Set a callback to run when the Google Visualization API is loaded.
-      google.setOnLoadCallback(drawChart#{@chart_i});
-
-      // Callback that creates and populates a data table,
-      // instantiates the pie chart, passes in the data and
-      // draws it.
-      function drawChart#{@chart_i}() {
-
-        // Create the data table.
-        var data = new google.visualization.DataTable();
-        data.addColumn('string', 'Time');
-        data.addColumn('number', 'Requests');
-        data.addRows([
+        <script type="text/javascript">
+          google.setOnLoadCallback(drawChart#{@chart_i});
+          function drawChart#{@chart_i}() {
+            var data = new google.visualization.DataTable();
+            data.addColumn('string', 'Time');
+            data.addColumn('number', 'Requests');
+            data.addRows([
+          HTML
+          buckets.each do |time, stats|
+            output << "['#{time}', #{stats["stats"]["count"]}],"
+          end
+          output << <<-HTML
+            ]);
+            var options = {'title':'#{title}',
+                           'width':900,
+                           'height':300};
+            var chart = new google.visualization.LineChart(document.getElementById('chart_div#{@chart_i}'));
+            chart.draw(data, options);
+          }
+        </script>
+        <br><br><br><br><br><br><br>
+        <div id="chart_div#{@chart_i}"></div>
       HTML
-      buckets.each do |time, stats|
-        output << "['#{time}', #{stats["stats"]["count"]}],"
-      end
-      output << <<-HTML
-        ]);
-
-        // Set chart options
-        var options = {'title':'#{title}',
-                       'width':900,
-                       'height':300};
-
-        // Instantiate and draw our chart, passing in some options.
-        var chart = new google.visualization.LineChart(document.getElementById('chart_div#{@chart_i}'));
-        chart.draw(data, options);
-      }
-    </script>
-    <br><br><br><br><br><br><br>
-    <div id="chart_div#{@chart_i}"></div>
-        HTML
     end
 
     def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d })
@@ -80,13 +73,17 @@ class Hawat
       sorted_data.each do |name, data|
         data = reach_in[data]
         fout << "<tr>"
-        fout << "<td>#{[*name].join(" ")}</td>"
-        fout << "<td>#{data["stats"]["count"]}</td>"
-        fout << "<td>#{error_count(data["stats"]["status"])}</td>"
-        fout << "<td>#{data["stats"]["duration"]["mean"]}</td>"
-        fout << "<td>#{data["stats"]["duration"]["min"]}</td>"
-        fout << "<td>#{data["stats"]["duration"]["max"]}</td>"
-        fout << "<td>#{data["conc"]["max"]}</td>"
+        [
+          [*name].join(" "),
+          data["stats"]["count"],
+          error_count(data["stats"]["status"]),
+          data["stats"]["duration"]["mean"],
+          data["stats"]["duration"]["min"],
+          data["stats"]["duration"]["max"],
+          data["conc"]["max"]
+        ].each do |cell|
+          fout << "<td>#{cell}</td>"
+        end
         fout << "</tr>"
       end
       fout << "</table>"
