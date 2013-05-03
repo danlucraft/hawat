@@ -179,12 +179,13 @@ class Hawat
 
       def add(path, line)
         @count += 1
-        @terminal.update(line)
         bits = path.split("/")
         if bits.length > 1
           name = bits[1]
           node = (@children[name] ||= PathNode.new(@terminal_generator))
           node.add("/" + bits[2..-1].join("/"), line)
+        else
+          @terminal.update(line)
         end
       end
 
