@@ -31,16 +31,18 @@ class Hawat
       end
     end
 
-    def stats_time_series(output, buckets)
+    def stats_time_series(output, title, buckets)
+      @chart_i ||= 0
+      @chart_i += 1
       output << <<-HTML
     <script type="text/javascript">
       // Set a callback to run when the Google Visualization API is loaded.
-      google.setOnLoadCallback(drawChart);
+      google.setOnLoadCallback(drawChart#{@chart_i});
 
       // Callback that creates and populates a data table,
       // instantiates the pie chart, passes in the data and
       // draws it.
-      function drawChart() {
+      function drawChart#{@chart_i}() {
 
         // Create the data table.
         var data = new google.visualization.DataTable();
@@ -55,17 +57,17 @@ class Hawat
         ]);
 
         // Set chart options
-        var options = {'title':'All Frontends',
+        var options = {'title':'#{title}',
                        'width':900,
                        'height':300};
 
         // Instantiate and draw our chart, passing in some options.
-        var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+        var chart = new google.visualization.LineChart(document.getElementById('chart_div#{@chart_i}'));
         chart.draw(data, options);
       }
     </script>
     <br><br><br><br><br><br><br>
-    <div id="chart_div"></div>
+    <div id="chart_div#{@chart_i}"></div>
         HTML
     end
 
@@ -101,7 +103,7 @@ class Hawat
         fout << "<div id=global>"
         fout << "<div id=breadcrumbs><h2>All</h2></div>"
         stats_boxes(fout, @stats["global"]["all"])
-        stats_time_series(fout, @stats["global"]["series"])
+        stats_time_series(fout, "All frontends", @stats["global"]["series"])
 
         table(fout, @stats["frontends"], 
               sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
@@ -112,7 +114,7 @@ class Hawat
           fout << "<div id=\"frontend-#{name}\">"
           fout << "<div id=breadcrumbs><h2>#{name}</h2></div>"
           stats_boxes(fout, data["global"]["all"])
-          #stats_time_series(fout, @stats["global_series"])
+          stats_time_series(fout, name, data["global"]["series"])
           new_data = {}
           data["paths"].each do |path, methods|
             methods.each do |method, data|
@@ -127,5 +129,6 @@ class Hawat
         fout << "</div>"
       end
     end
+
   end
 end
