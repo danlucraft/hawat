@@ -1,4 +1,3 @@
-require 'rubyvis'
 
 class Hawat
   class Html
@@ -11,7 +10,6 @@ class Hawat
     end
 
     def stats_boxes(output, stats)
-      p stats
       output << "<div class='stats'>"
       output <<   "<div><div class='number'>#{stats["stats"]["count"]}</div>Count</div>"
       output <<   "<div><div class='number'>#{error_count(stats["stats"]["status"])}</div>Errors</div>"
@@ -36,8 +34,6 @@ class Hawat
     def stats_time_series(output, buckets)
       output << <<-HTML
     <script type="text/javascript">
-      // Load the Visualization API and the piechart package.
-      google.load('visualization', '1.0', {'packages':['corechart']});
       // Set a callback to run when the Google Visualization API is loaded.
       google.setOnLoadCallback(drawChart);
 
@@ -73,15 +69,14 @@ class Hawat
         HTML
     end
 
-    def frontends_table(fout, frontends)
+    def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d })
       fout << "<table>"
       fout << "<tr>"
       ["Name", "Requests", "Errors", "Latency (mean)", "Latency (min)", "Latency (max)", "Max Concurrency"].each {|n| fout << "<th>#{n}</th>"}
       fout << "</tr>"
-      sorted_frontends = frontends.to_a.sort_by {|_,d| d["global"]["stats"]["count"]}.reverse
-      sorted_frontends.each do |name, data|
-        data = data["global"]
-        p data
+      sorted_data = data.to_a.sort_by {|_,d| sort_field[d]}.reverse
+      sorted_data.each do |name, data|
+        data = reach_in[data]
         fout << "<tr>"
         fout << "<td>#{name}</td>"
         fout << "<td>#{data["stats"]["count"]}</td>"
@@ -96,40 +91,38 @@ class Hawat
     end
 
     def generate
-      p @stats.keys
       File.open("output.html", "w") do |fout|
         fout << "<h1>Hawat</h1>"
-        fout << "<h2>All</h2>"
         fout << "<script type=\"text/javascript\" src=\"https://www.google.com/jsapi\"></script>"
-        <<-HTML
-
-    <script type='text/javascript'>
-      google.load('visualization', '1', {packages:['table']});
-      google.setOnLoadCallback(drawTable);
-      function drawTable() {
-        var data = new google.visualization.DataTable();
-        data.addColumn('string', 'Name');
-        data.addColumn('number', 'Salary');
-        data.addColumn('boolean', 'Full Time Employee');
-        data.addRows([
-          ['Mike',  {v: 10000, f: '$10,000'}, true],
-          ['Jim',   {v:8000,   f: '$8,000'},  false],
-          ['Alice', {v: 12500, f: '$12,500'}, true],
-          ['Bob',   {v: 7000,  f: '$7,000'},  true]
-        ]);
-
-        var table = new google.visualization.Table(document.getElementById('table_div'));
-        table.draw(data, {showRowNumber: true});
-      }
-    </script>
-  </head>
-
-    <div id='table_div'></div>
-        HTML
+        fout << "<script>#{File.read("views/js.js")}</script>"
         fout << "<style>#{File.read("views/style.css")}</style>"
+        fout << "<div id=container>"
+
+        fout << "<div id=global>"
+        fout << "<div id=breadcrumbs><h2>All</h2></div>"
         stats_boxes(fout, global)
         stats_time_series(fout, @stats["global_series"])
-        frontends_table(fout, @stats["frontends"])
+        table(fout, @stats["frontends"].merge("all" => {"global" => @stats["global"]}), 
+              sort_field: proc {|d| d["global"]["stats"]["count"]}, 
+              reach_in: proc {|d| d["global"] })
+        fout << "</div>"
+
+        @stats["frontends"].each do |name, data|
+          fout << "<div id=\"frontend-#{name}\">"
+          fout << "<div id=breadcrumbs><h2>#{name}</h2></div>"
+          stats_boxes(fout, data["global"])
+          #stats_time_series(fout, @stats["global_series"])
+          new_data = {}
+          data["paths"].each do |path, methods|
+            methods.each do |method, data|
+              new_data["#{method} /#{path}".gsub("//", "/")] = {"stats" => data["all"], "conc" => {"max" => "-"}}
+            end
+          end
+          table(fout, new_data, #.merge("all" => {"global" => data["global"]}), 
+                sort_field: proc {|d| d["stats"]["count"] })
+          fout << "</div>"
+        end
+        fout << "</div>"
       end
     end
   end
