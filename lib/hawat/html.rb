@@ -5,10 +5,6 @@ class Hawat
       @stats = stats
     end
 
-    def global
-      @stats["global"]
-    end
-
     def stats_boxes(output, stats)
       output << "<div class='stats'>"
       [
@@ -64,17 +60,26 @@ class Hawat
       HTML
     end
 
-    def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d })
+    def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n| nil})
       fout << "<table>"
       fout << "<tr>"
-      ["Name", "Requests", "Errors", "Latency (mean)", "Latency (min)", "Latency (max)", "Max Concurrency"].each {|n| fout << "<th>#{n}</th>"}
+      [
+        "Name", "Requests", "Errors", "Latency (mean)", 
+        "Latency (min)", "Latency (max)", "Max Concurrency"
+      ].each {|n| fout << "<th>#{n}</th>"}
       fout << "</tr>"
       sorted_data = data.to_a.sort_by {|_,d| sort_field[d]}.reverse
       sorted_data.each do |name, data|
         data = reach_in[data]
         fout << "<tr>"
+        l = link[name]
+        if l
+          fout << "<td><a href='\##{l}'>#{[*name].join(" ")}</a></td>"
+        else
+          fout << "<td>#{[*name].join(" ")}</td>"
+        end
+
         [
-          [*name].join(" "),
           data["stats"]["count"],
           error_count(data["stats"]["status"]),
           data["stats"]["duration"]["mean"],
@@ -88,10 +93,11 @@ class Hawat
       end
       fout << "</table>"
     end
+    TITLE = "Hawat"
 
     def generate
       File.open("output.html", "w") do |fout|
-        fout << "<h1>Hawat</h1>"
+        fout << "<h1><a name=top>#{TITLE}</a></h1>"
         fout << "<script type=\"text/javascript\" src=\"https://www.google.com/jsapi\"></script>"
         fout << "<script>#{File.read("views/js.js")}</script>"
         fout << "<style>#{File.read("views/style.css")}</style>"
@@ -104,12 +110,14 @@ class Hawat
 
         table(fout, @stats["frontends"], 
               sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
-              reach_in: proc {|d| d["global"]["all"] })
+              reach_in: proc {|d| d["global"]["all"] },
+              link: proc {|n| "frontend-#{n}" })
         fout << "</div>"
 
         @stats["frontends"].each do |name, data|
-          fout << "<div id=\"frontend-#{name}\">"
+          fout << "<a name=\"frontend-#{name}\">"
           fout << "<div id=breadcrumbs><h2>#{name}</h2></div>"
+          fout << "</a>"
           stats_boxes(fout, data["global"]["all"])
           stats_time_series(fout, name, data["global"]["series"])
           new_data = {}
@@ -123,7 +131,6 @@ class Hawat
                 reach_in: proc {|d| d["all"] })
           fout << "</div>"
         end
-        fout << "</div>"
       end
     end
 
