@@ -31,20 +31,19 @@ class Hawat
       end
     end
 
-    def stats_time_series(output, title, buckets)
+    def stats_time_series(output, title, buckets, reach_in: proc {|d| d})
       @chart_i ||= 0
       @chart_i += 1
       output << <<-HTML
         <script type="text/javascript">
-          google.setOnLoadCallback(drawChart#{@chart_i});
-          function drawChart#{@chart_i}() {
+          Hawat.drawChart#{@chart_i} = function() {
             var data = new google.visualization.DataTable();
             data.addColumn('string', 'Time');
             data.addColumn('number', 'Requests');
             data.addRows([
           HTML
           buckets.each do |time, stats|
-            output << "['#{time}', #{stats["stats"]["count"]}],"
+            output << "['#{time}', #{reach_in[stats]}],"
           end
           output << <<-HTML
             ]);
@@ -56,8 +55,9 @@ class Hawat
           }
         </script>
         <br><br><br><br><br><br><br>
-        <div id="chart_div#{@chart_i}"></div>
+        <div id="chart_div#{@chart_i}" class="chart" data-function="drawChart#{@chart_i}"></div>
       HTML
+      "drawChart#{@chart_i}"
     end
 
     def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n| nil})
@@ -107,7 +107,15 @@ class Hawat
         fout << "<div class=databox id=global>"
         fout << "<div id=breadcrumbs><h2>All</h2></div>"
         stats_boxes(fout, @stats["global"]["all"])
-        stats_time_series(fout, "All frontends", @stats["global"]["series"])
+        [
+          ["Requests", proc {|d| d["stats"]["count"] }],
+          ["Errors", proc {|d| error_count(d["stats"]["status"]) }],
+          ["Mean Latency", proc {|d| d["stats"]["duration"]["mean"] }],
+          ["Max Concurrency", proc {|d| d["conc"]["max"] }],
+        ].each do |title, fetch|
+          id = stats_time_series(fout, "All frontends #{title}", @stats["global"]["series"], reach_in: fetch)
+          fout << "<script>Hawat.#{id}()</script>"
+        end
 
         table(fout, @stats["frontends"], 
               sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
@@ -120,7 +128,15 @@ class Hawat
           fout << ""
           fout << "<div id=breadcrumbs><h2><a onclick=\"Hawat.showDataBox('global')\">top</a> &gt; #{name}</h2></div>"
           stats_boxes(fout, data["global"]["all"])
-          stats_time_series(fout, name, data["global"]["series"])
+          [
+            ["Requests", proc {|d| d["stats"]["count"] }],
+            ["Errors", proc {|d| error_count(d["stats"]["status"]) }],
+            ["Mean Latency", proc {|d| d["stats"]["duration"]["mean"] }],
+            ["Max Concurrency", proc {|d| d["conc"]["max"] }],
+          ].each do |title, fetch|
+            stats_time_series(fout, "#{name} #{title}", data["global"]["series"], reach_in: fetch)
+          end
+
           new_data = {}
           data["paths"].each do |path, methods|
             methods.each do |method, data|

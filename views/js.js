@@ -8,6 +8,11 @@ var Hawat = {
     $(".databox").each(function(i, el) {
       if ($(el).attr("id") == name) {
         $(el).show()
+        $(el).find(".chart").each(function(i, el) {
+          var chartDrawerName = $(el).attr("data-function")
+          var chartDrawer = Hawat[chartDrawerName]
+          chartDrawer()
+        })
       } else {
         $(el).hide()
       }
