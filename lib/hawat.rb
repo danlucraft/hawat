@@ -310,23 +310,25 @@ class Hawat
     NamedAggregate.new("stats" => StatisticsTerminal.new, "conc" => ConcurrencyTerminal.new)
   end
 
+  TIME_BUCKETS = 60*5
+
   def default_stats
     frontends = FrontendAggregate.new do
       NamedAggregate.new(
         "global" => NamedAggregate.new(
           "all" => default_aggregate,
-          "series" => TimeBucketerAggregate.new(5) { default_aggregate }),
+          "series" => TimeBucketerAggregate.new(TIME_BUCKETS) { default_aggregate }),
         "paths" => PathStatsAggregate.new { 
           MethodAggregate.new {
             NamedAggregate.new(
               "all" => default_aggregate,
-              "series" => TimeBucketerAggregate.new(5) { StatisticsTerminal.new })}
+              "series" => TimeBucketerAggregate.new(TIME_BUCKETS) { StatisticsTerminal.new })}
         })
     end
     NamedAggregate.new(
       "global" => NamedAggregate.new(
         "all" => default_aggregate,
-        "series" => TimeBucketerAggregate.new(5) { default_aggregate }),
+        "series" => TimeBucketerAggregate.new(TIME_BUCKETS) { default_aggregate }),
       "frontends"     => frontends)
   end
 
