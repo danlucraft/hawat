@@ -8,7 +8,8 @@ body {
   text-align: center;
 }
 
-.stats > div {
+.stats a {
+  display: block;
   float:   left;
   width: 150px;
   padding: 15px;

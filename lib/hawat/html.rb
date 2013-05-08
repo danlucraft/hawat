@@ -7,16 +7,22 @@ class Hawat
 
     def stats_boxes(output, stats)
       output << "<div class='stats'>"
+      chart_ids = []
+      @boxes_id ||= 0
       [
-        [stats["stats"]["count"], "Count"],
-        [error_count(stats["stats"]["status"]), "Errors"],
+        [stats["stats"]["count"],                     "Count"],
+        [error_count(stats["stats"]["status"]),       "Errors"],
         [latency(stats["stats"]["duration"]["mean"]), "Mean Latency"],
-        [latency(stats["stats"]["duration"]["max"]), "Max Latency"],
-        [stats["conc"]["max"], "Max Conc."]
+        [latency(stats["stats"]["duration"]["max"]),  "Max Latency"],
+        [stats["conc"]["max"],                        "Max Conc."]
       ].each do |value, title|
-        output <<   "<div><div class='number'>#{value}</div>#{title}</div>"
+        @boxes_id += 1
+        chart_id = title.gsub(" ", "-").downcase.gsub(/[^a-z0-9]/, "") + @boxes_id.to_s
+        output <<  "<div><a onclick=\"Hawat.displayChart('#{chart_id}')\"><div class='number'>#{value}</div>#{title}</a></div>\n"
+        chart_ids << chart_id
       end
       output << "</div>"
+      chart_ids
     end
 
     def error_count(status_counts)
@@ -31,12 +37,12 @@ class Hawat
       end
     end
 
-    def stats_time_series(output, title, buckets, reach_in: proc {|d| d})
+    def stats_time_series(output, title, buckets, reach_in: proc {|d| d}, chart_id: nil, display: false)
       @chart_i ||= 0
-      @chart_i += 1
+      chart_id ||= (@chart_i += 1)
       output << <<-HTML
         <script type="text/javascript">
-          Hawat.drawChart#{@chart_i} = function() {
+          Hawat.drawChart#{chart_id} = function() {
             var data = new google.visualization.DataTable();
             data.addColumn('string', 'Time');
             data.addColumn('number', 'Requests');
@@ -50,24 +56,23 @@ class Hawat
             var options = {'title':'#{title}',
                            'width':900,
                            'height':300};
-            var chart = new google.visualization.LineChart(document.getElementById('chart_div#{@chart_i}'));
+            var chart = new google.visualization.LineChart(document.getElementById('chart-#{chart_id}'));
             chart.draw(data, options);
           }
         </script>
-        <br><br><br><br><br><br><br>
-        <div id="chart_div#{@chart_i}" class="chart" data-function="drawChart#{@chart_i}"></div>
+        <div style="#{display ? "" : "display:none;"}clear:both;" id="chart-#{chart_id}" class="chart" data-function="drawChart#{chart_id}"></div>
       HTML
-      "drawChart#{@chart_i}"
+      "drawChart#{chart_id}"
     end
 
     def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n| nil})
-      fout << "<table>"
+      fout << "<table>\n"
       fout << "<tr>"
       [
         "Name", "Requests", "Errors", "Latency (mean)", 
         "Latency (min)", "Latency (max)", "Max Concurrency"
       ].each {|n| fout << "<th>#{n}</th>"}
-      fout << "</tr>"
+      fout << "</tr>\n"
       sorted_data = data.to_a.sort_by {|_,d| sort_field[d]}.reverse
       sorted_data.each do |name, data|
         data = reach_in[data]
@@ -89,34 +94,45 @@ class Hawat
         ].each do |cell|
           fout << "<td>#{cell}</td>"
         end
-        fout << "</tr>"
+        fout << "</tr>\n"
       end
-      fout << "</table>"
+      fout << "</table>\n"
     end
     TITLE = "Hawat"
 
-    def generate
-      File.open("output.html", "w") do |fout|
-        fout << "<h1><a name=top>#{TITLE}</a></h1>"
-        fout << "<script type=\"text/javascript\" src=\"https://www.google.com/jsapi\"></script>"
-        fout << "<script src=\"http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js\" type=\"text/javascript\"></script>"
-        fout << "<script>#{File.read("views/js.js")}</script>"
-        fout << "<style>#{File.read("views/style.css")}</style>"
-        fout << "<div id=container>"
-
-        fout << "<div class=databox id=global>"
-        fout << "<div id=breadcrumbs><h2>All</h2></div>"
-        stats_boxes(fout, @stats["global"]["all"])
-        [
-          ["Requests", proc {|d| d["stats"]["count"] }],
-          ["Errors", proc {|d| error_count(d["stats"]["status"]) }],
-          ["Mean Latency", proc {|d| d["stats"]["duration"]["mean"] }],
-          ["Max Concurrency", proc {|d| d["conc"]["max"] }],
-        ].each do |title, fetch|
-          id = stats_time_series(fout, "All frontends #{title}", @stats["global"]["series"], reach_in: fetch)
+    def boxes(fout, title, data, display: false)
+      chart_ids = stats_boxes(fout, data["global"]["all"])
+      ids = chart_ids.clone
+      first = true
+      [
+        ["Requests",        proc {|d| d["stats"]["count"] },             ],
+        ["Errors",          proc {|d| error_count(d["stats"]["status"]) }],
+        ["Mean Latency",    proc {|d| d["stats"]["duration"]["mean"] }   ],
+        ["Max Latency",     proc {|d| d["stats"]["duration"]["max"] }    ],
+        ["Max Concurrency", proc {|d| d["conc"]["max"] }                 ],
+      ].each do |sub_title, fetch|
+        id = stats_time_series(fout, "#{title} #{sub_title}", data["global"]["series"], reach_in: fetch, chart_id: ids.shift, display: first)
+        first = false
+        if display
           fout << "<script>Hawat.#{id}()</script>"
         end
+      end
+      chart_ids
+    end
 
+    def generate
+      File.open("output.html", "w") do |fout|
+        fout << "<h1><a name=top>#{TITLE}</a></h1>\n"
+        fout << "<script type=\"text/javascript\" src=\"https://www.google.com/jsapi\"></script>\n"
+        fout << "<script src=\"http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js\" type=\"text/javascript\"></script>\n"
+        fout << "<script>#{File.read("views/js.js")}</script>\n"
+        fout << "<style>#{File.read("views/style.css")}</style>\n"
+        fout << "<div id=container>\n"
+
+        fout << "<div class=databox id=global>\n"
+        fout << "<div id=breadcrumbs><h2>All</h2></div>\n"
+        chart_ids = boxes(fout, "All frontends", @stats, display: true)
+        #fout <<  "<script>$(document).ready(function() { Hawat.displayChart('#{chart_ids.first}') })</script>\n"
         table(fout, @stats["frontends"], 
               sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
               reach_in: proc {|d| d["global"]["all"] },
@@ -124,19 +140,10 @@ class Hawat
         fout << "</div>"
 
         @stats["frontends"].each do |name, data|
-          fout << "<div class=databox id=\"frontend-#{name}\" style=\"display:none;\">"
-          fout << ""
-          fout << "<div id=breadcrumbs><h2><a onclick=\"Hawat.showDataBox('global')\">top</a> &gt; #{name}</h2></div>"
-          stats_boxes(fout, data["global"]["all"])
-          [
-            ["Requests", proc {|d| d["stats"]["count"] }],
-            ["Errors", proc {|d| error_count(d["stats"]["status"]) }],
-            ["Mean Latency", proc {|d| d["stats"]["duration"]["mean"] }],
-            ["Max Concurrency", proc {|d| d["conc"]["max"] }],
-          ].each do |title, fetch|
-            stats_time_series(fout, "#{name} #{title}", data["global"]["series"], reach_in: fetch)
-          end
-
+          fout << "<div class=databox id=\"frontend-#{name}\" style=\"display:none;\">\n"
+          fout << "\n"
+          fout << "<div id=breadcrumbs><h2><a onclick=\"Hawat.showDataBox('global')\">top</a> &gt; #{name}</h2></div>\n"
+          boxes(fout, name, data, display: false)
           new_data = {}
           data["paths"].each do |path, methods|
             methods.each do |method, data|
