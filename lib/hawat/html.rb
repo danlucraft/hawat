@@ -43,6 +43,7 @@ class Hawat
       output << <<-HTML
         <script type="text/javascript">
           Hawat.drawChart#{chart_id} = function() {
+            console.log("drawChart#{chart_id}()")
             var data = new google.visualization.DataTable();
             data.addColumn('string', 'Time');
             data.addColumn('number', 'Requests');
@@ -65,7 +66,7 @@ class Hawat
       "drawChart#{chart_id}"
     end
 
-    def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n| nil})
+    def table(fout, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n,i| nil})
       fout << "<table>\n"
       fout << "<tr>"
       [
@@ -74,12 +75,12 @@ class Hawat
       ].each {|n| fout << "<th>#{n}</th>"}
       fout << "</tr>\n"
       sorted_data = data.to_a.sort_by {|_,d| sort_field[d]}.reverse
-      sorted_data.each do |name, data|
+      sorted_data.each_with_index do |(name, data), i|
         data = reach_in[data]
         fout << "<tr>"
-        l = link[name]
+        l = link[name,i]
         if l
-          fout << "<td><a onclick=\"Hawat.showDataBox('frontend-#{name}')\">#{[*name].join(" ")}</a></td>"
+          fout << (s="<td><a onclick=\"Hawat.showDataBox('#{l}')\">#{[*name].join(" ")}</a></td>")
         else
           fout << "<td>#{[*name].join(" ")}</td>"
         end
@@ -101,7 +102,7 @@ class Hawat
     TITLE = "Hawat"
 
     def boxes(fout, title, data, display: false)
-      chart_ids = stats_boxes(fout, data["global"]["all"])
+      chart_ids = stats_boxes(fout, data["all"])
       ids = chart_ids.clone
       first = true
       [
@@ -111,7 +112,7 @@ class Hawat
         ["Max Latency",     proc {|d| d["stats"]["duration"]["max"] }    ],
         ["Max Concurrency", proc {|d| d["conc"]["max"] }                 ],
       ].each do |sub_title, fetch|
-        id = stats_time_series(fout, "#{title} #{sub_title}", data["global"]["series"], reach_in: fetch, chart_id: ids.shift, display: first)
+        id = stats_time_series(fout, "#{title} #{sub_title}", data["series"], reach_in: fetch, chart_id: ids.shift, display: first)
         first = false
         if display
           fout << "<script>Hawat.#{id}()</script>"
@@ -131,19 +132,19 @@ class Hawat
 
         fout << "<div class=databox id=global>\n"
         fout << "<div id=breadcrumbs><h2>All</h2></div>\n"
-        chart_ids = boxes(fout, "All frontends", @stats, display: true)
+        chart_ids = boxes(fout, "All frontends", @stats["global"], display: true)
         #fout <<  "<script>$(document).ready(function() { Hawat.displayChart('#{chart_ids.first}') })</script>\n"
         table(fout, @stats["frontends"], 
               sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
               reach_in: proc {|d| d["global"]["all"] },
-              link: proc {|n| "frontend-#{n}" })
+              link: proc {|n,i| "frontend-#{n}" })
         fout << "</div>"
 
         @stats["frontends"].each do |name, data|
           fout << "<div class=databox id=\"frontend-#{name}\" style=\"display:none;\">\n"
           fout << "\n"
           fout << "<div id=breadcrumbs><h2><a onclick=\"Hawat.showDataBox('global')\">top</a> &gt; #{name}</h2></div>\n"
-          boxes(fout, name, data, display: false)
+          boxes(fout, name, data["global"], display: false)
           new_data = {}
           data["paths"].each do |path, methods|
             methods.each do |method, data|
@@ -152,11 +153,23 @@ class Hawat
           end
           table(fout, new_data,
                 sort_field: proc {|d| d["all"]["stats"]["count"] },
-                reach_in: proc {|d| d["all"] })
+                reach_in: proc {|d| d["all"] },
+                link: proc {|n,i| "frontend-#{name}-path-#{i}" })
           fout << "</div>"
+
+          path_id = 0
+          new_data.each do |(method, path), path_data|
+            path_id += 1
+            next if path_id > 2
+            fout << "<div class=databox id=\"frontend-#{name}-path-#{path_id}\" style=\"display:none;\">\n"
+            boxes(fout, "#{name}, #{method} #{path}", path_data, display: false)
+            fout << "</div>"
+          end
         end
       end
     end
 
   end
 end
+
+

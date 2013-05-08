@@ -322,7 +322,7 @@ class Hawat
           MethodAggregate.new {
             NamedAggregate.new(
               "all" => default_aggregate,
-              "series" => TimeBucketerAggregate.new(TIME_BUCKETS) { StatisticsTerminal.new })}
+              "series" => TimeBucketerAggregate.new(TIME_BUCKETS) { default_aggregate })}
         })
     end
     NamedAggregate.new(
