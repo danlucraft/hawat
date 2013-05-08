@@ -1,0 +1,191 @@
+
+<html>
+  <head>
+    <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js" type="text/javascript"></script>
+
+    <script>
+
+      var Hawat = {
+        databoxes: {},
+        currentDataboxName: null,
+        chart: null,
+
+        displayDatabox: function(name) {
+          console.log("displayDatabox("+name+")")
+          Hawat.currentDataboxName = name
+          var data = Hawat.databoxes[Hawat.currentDataboxName]
+          if (data !== undefined) {
+            var crumbs = $("#breadcrumbs h2")
+            crumbs.html("")
+            var firstCrumb = data["breadcrumbs"][0]
+            crumbs.append("<a onclick=\"Hawat.displayDatabox('" + firstCrumb.databox + "')\">" + firstCrumb.text + "</a>")
+            $(data["breadcrumbs"]).each(function(i, crumb) {
+              if (i > 0) {
+                crumbs.append(" &gt; <a onclick=\"Hawat.displayDatabox('" + crumb.databox + "')\">" + crumb.text + "</a>")
+              }
+            })
+
+            $(data["boxes"]).each(function(i, box) {
+              var id = box["bind"]
+              var value = box["value"]
+              var units = box["units"]
+              if (units == "ms" && value > 1000) {
+                value = Math.round(value / 100)/10
+                units = "s"
+              }
+              $("#" + id + " .number .value").html(value)
+              $("#" + id + " .number .units").html(units)
+            })
+
+            var tbody = $($("table tbody")[1])
+            tbody.html("")
+            if (data["table"] !== undefined) {
+              $(data["table"]).each(function(i, row) {
+                var tr = $("<tr/>")
+                $(row).each(function(i, column) {
+                  if (column.showDatabox) {
+                    tr.append("<td><a onclick='Hawat.displayDatabox(\"" + column.showDatabox + "\")'>" + column.content + "</a></td>")
+                  } else {
+                    tr.append("<td>" + column.content + "</td>")
+                  }
+                })
+                tbody.append(tr)
+              })
+              $("table").show()
+            } else {
+              $("table").hide()
+            }
+
+            Hawat.displayChart("requests")
+          }
+        },
+
+        displayChart: function(name) {
+          var chartData = Hawat.databoxes[Hawat.currentDataboxName]["charts"][name]
+          var data = new google.visualization.DataTable();
+          data.addColumn('string', 'Time')
+          data.addColumn('number', 'Requests')
+          data.addRows(chartData["series"])
+          var options = {'title':chartData["title"],
+                         'width':900,
+                         'height':300};
+          Hawat.chart.draw(data, options);
+        }
+      }
+
+      google.load("visualization", "1", {packages:["corechart"]});
+
+      $(document).ready(function() {
+        Hawat.chart = new google.visualization.LineChart(document.getElementById('chart'));
+        var data = new google.visualization.DataTable();
+        var options = {'title':'#{title}',
+                       'width':900,
+                       'height':300};
+        Hawat.chart.draw(data, options);
+      })
+
+    </script>
+
+    <script>JAVASCRIPT</script>
+    <style>
+      body {
+        padding: 50px;
+        font-family: Helvetica;
+      }
+
+      #bigstats {
+        font-size: 1.2em;
+        text-align: center;
+      }
+
+      #bigstats a {
+        display: block;
+        float:   left;
+        width: 150px;
+        padding: 15px;
+        border:  1px solid gray;
+        margin-right: 20px;
+      }
+
+      #bigstats .number {
+        font-size: 2em;
+      }
+
+      #bigstats .number .units {
+        font-size: 0.5em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1><a name=top>Hawat</a></h1>
+    <div id=container>
+
+      <div id=breadcrumbs>
+        <h2>All</h2>
+      </div>
+
+      <div id=databox>
+
+        <div id=bigstats>
+          <div id=bigstat-requests>
+            <a onclick="Hawat.displayChart('requests')">
+              <div class=number><span class=value>1000</span><span class=units></span></div>
+              Count
+            </a>
+          </div>
+
+          <div id=bigstat-errors>
+            <a onclick="Hawat.displayChart('errors')">
+              <div class=number><span class=value>1000</span><span class=units></span></div>
+              Errors
+            </a>
+          </div>
+
+          <div id=bigstat-mean-duration>
+            <a onclick="Hawat.displayChart('mean-duration')">
+              <div class=number><span class=value>1000</span><span class=units></span></div>
+              Mean Latency
+            </a>
+          </div>
+
+          <div id=bigstat-max-duration>
+            <a onclick="Hawat.displayChart('max-duration')">
+              <div class=number><span class=value>1000</span><span class=units></span></div>
+              Max Latency
+            </a>
+          </div>
+
+          <div id=bigstat-max-conc>
+            <a onclick="Hawat.displayChart('max-conc')">
+              <div class=number><span class=value>1000</span><span class=units></span></div>
+              Max Conc.
+            </a>
+          </div>
+        </div>
+
+        <div id=chart style="clear:both;">
+        </div>
+
+        <table>
+          <tr>
+            <th>Name</th>
+            <th>Requests</th>
+            <th>Latency (mean)</th>
+            <th>Latency (min)</th>
+            <th>Latency (max)</th>
+            <th>Max Concurrency</th>
+          </tr>
+          <tbody>
+          </tbody>
+        </table>
+
+      </div>
+    </div>
+
+  </body>
+</html>
+
+
+
+
