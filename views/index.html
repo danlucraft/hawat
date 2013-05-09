@@ -89,9 +89,28 @@
 
     <script>JAVASCRIPT</script>
     <style>
+
       body {
-        padding: 50px;
         font-family: Helvetica;
+        padding: 0;
+        margin: 0;
+        text-align: center;
+        color: #333;
+      }
+
+      #container {
+        padding-left: 50px;
+        display: inline-block;
+        text-align: left;
+      }
+
+      h1 {
+        display: block;
+        background-color: #EEE;
+        padding: 20px;
+        padding-left: 50px;
+        margin: 0;
+        margin-bottom: 20px;
       }
 
       #bigstats {
@@ -99,9 +118,13 @@
         text-align: center;
       }
 
+      #chart {
+        margin-left: auto;
+        margin-right: auto;
+      }
+
       #bigstats a {
-        display: block;
-        float:   left;
+        display: inline-block;
         width: 150px;
         padding: 15px;
         border:  1px solid gray;
@@ -115,12 +138,13 @@
       #bigstats .number .units {
         font-size: 0.5em;
       }
+
     </style>
   </head>
 
   <body>
-    <h1><a name=top>Hawat</a></h1>
     <div id=container>
+      <h1><a name=top>Hawat</a></h1>
 
       <div id=breadcrumbs>
         <h2>All</h2>
@@ -129,40 +153,30 @@
       <div id=databox>
 
         <div id=bigstats>
-          <div id=bigstat-requests>
-            <a onclick="Hawat.displayChart('requests')">
-              <div class=number><span class=value>1000</span><span class=units></span></div>
-              Count
-            </a>
-          </div>
+          <a id=bigstat-requests onclick="Hawat.displayChart('requests')">
+            <div class=number><span class=value>1000</span><span class=units></span></div>
+            Count
+          </a>
 
-          <div id=bigstat-errors>
-            <a onclick="Hawat.displayChart('errors')">
-              <div class=number><span class=value>1000</span><span class=units></span></div>
-              Errors
-            </a>
-          </div>
+          <a id=bigstat-errors onclick="Hawat.displayChart('errors')">
+            <div class=number><span class=value>1000</span><span class=units></span></div>
+            Errors
+          </a>
 
-          <div id=bigstat-mean-duration>
-            <a onclick="Hawat.displayChart('mean-duration')">
-              <div class=number><span class=value>1000</span><span class=units></span></div>
-              Mean Latency
-            </a>
-          </div>
+          <a id=bigstat-mean-duration onclick="Hawat.displayChart('mean-duration')">
+            <div class=number><span class=value>1000</span><span class=units></span></div>
+            Mean Latency
+          </a>
 
-          <div id=bigstat-max-duration>
-            <a onclick="Hawat.displayChart('max-duration')">
-              <div class=number><span class=value>1000</span><span class=units></span></div>
-              Max Latency
-            </a>
-          </div>
+          <a id=bigstat-max-duration onclick="Hawat.displayChart('max-duration')">
+            <div class=number><span class=value>1000</span><span class=units></span></div>
+            Max Latency
+          </a>
 
-          <div id=bigstat-max-conc>
-            <a onclick="Hawat.displayChart('max-conc')">
-              <div class=number><span class=value>1000</span><span class=units></span></div>
-              Max Conc.
-            </a>
-          </div>
+          <a id=bigstat-max-conc onclick="Hawat.displayChart('max-conc')">
+            <div class=number><span class=value>1000</span><span class=units></span></div>
+            Max Conc.
+          </a>
         </div>
 
         <div id=chart style="clear:both;">

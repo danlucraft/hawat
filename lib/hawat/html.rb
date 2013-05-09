@@ -113,6 +113,7 @@ class Hawat
             ]
           }
           databox.merge!(boxes("#{name} / #{method} #{path}", path_data))
+          databoxes["frontend-#{name}-path-#{i}"] = databox
           i += 1
         end
       end
