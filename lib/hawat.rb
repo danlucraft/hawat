@@ -359,7 +359,12 @@ class Hawat
   LINE_RE = /^(\w+ \d+ \d+:\d+:\d+) (\S+) haproxy\[(\d+)\]: ([\d\.]+):(\d+) \[(\d+)\/(\w+)\/(\d+):(\d+:\d+:\d+\.\d+)\] ([^ ]+) ([^ ]+)\/([^ ]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+) (\d+) - - ([\w-]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+)\/(\d+) "(\w+) ([^ ]+)/
 
   class LineData
-    attr_accessor :md
+    attr_reader :md
+
+    def md=(value)
+      @md = value
+      @accepted = @closed = nil
+    end
 
     def haproxy_host; md[2]; end
     def haproxy_pid;  md[3]; end
@@ -372,13 +377,17 @@ class Hawat
     def timestamp; md[9]; end
 
     def accepted
-      hour, minute, sec, milli = *timestamp.split(/:|\./)
-      Time.local(year.to_i, month, day.to_i, hour.to_i, minute.to_i, sec.to_i, milli.to_i*1000)
+      @accepted ||= begin
+                      hour, minute, sec, milli = *timestamp.split(/:|\./)
+                      Time.local(year.to_i, month, day.to_i, hour.to_i, minute.to_i, sec.to_i, milli.to_i*1000)
+                    end
     end
 
     def closed
-      dur_s = Rational(total_time, 1000)
-      Time.at(accepted.to_r + dur_s)
+      @closed ||= begin
+                    dur_s = Rational(total_time, 1000)
+                    Time.at(accepted.to_r + dur_s)
+                  end
     end
 
     def frontend; md[10]; end
