@@ -5,8 +5,25 @@ class Hawat
       @stats = stats
     end
 
-    def stats_boxes(box, stats)
-      box["boxes"] = []
+    def boxes(title, data)
+      result = {
+        "boxes" => stats_boxes(data["all"]),
+        "charts" => {}
+      }
+      [
+        ["requests",      "Requests",        proc {|d| d["stats"]["count"] },             ],
+        ["errors",        "Errors",          proc {|d| error_count(d["stats"]["status"]) }],
+        ["mean-duration", "Mean Latency",    proc {|d| d["stats"]["duration"]["mean"] }   ],
+        ["max-duration",  "Max Latency",     proc {|d| d["stats"]["duration"]["max"] }    ],
+        ["max-conc",      "Max Concurrency", proc {|d| d["conc"]["max"] }                 ],
+      ].each do |bind, sub_title, fetch|
+        result["charts"][bind] = stats_time_series("#{title} #{sub_title}", data["series"], reach_in: fetch)
+      end
+      result
+    end
+
+    def stats_boxes(stats)
+      result = []
       [
         [stats["stats"]["count"],                "bigstat-requests", ""],
         [error_count(stats["stats"]["status"]),  "bigstat-errors", ""],
@@ -14,24 +31,26 @@ class Hawat
         [stats["stats"]["duration"]["max"],  "bigstat-max-duration", "ms"],
         [stats["conc"]["max"],               "bigstat-max-conc", ""],
       ].each do |value, title, units|
-        box["boxes"] << {bind: title, value: value, units: units}
+        result << {bind: title, value: value, units: units}
       end
+      result
     end
 
     def error_count(status_counts)
       status_counts.inject(0) {|m,(s,c)| (s !~ /^2/ && s != "404") ? m + c : m }
     end
 
-    def stats_time_series(box, bind, title, buckets, reach_in: proc {|d| d})
-      box[bind] = {title: title, series: []}
+    def stats_time_series(title, buckets, reach_in: proc {|d| d})
+      result = {title: title, series: []}
 
       buckets.each do |time, stats|
-        box[bind][:series] << [time, reach_in[stats]]
+        result[:series] << [time, reach_in[stats]]
       end
+      result
     end
 
-    def table(box, data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n,i| nil})
-      box["table"] = []
+    def table(data, sort_field: proc {|d| 1}, reach_in: proc {|d| d }, link: proc {|n,i| nil})
+      table = []
       sorted_data = data.to_a.sort_by {|_,d| sort_field[d]}.reverse
       sorted_data.each_with_index do |(name, data), i|
         data = reach_in[data]
@@ -48,51 +67,39 @@ class Hawat
         ].each do |cell|
           row << {content: cell}
         end
-        box["table"] << row
+        table << row
       end
-    end
-
-    def boxes(box, title, data)
-      stats_boxes(box, data["all"])
-      box["charts"] = {}
-      [
-        ["requests",      "Requests",        proc {|d| d["stats"]["count"] },             ],
-        ["errors",        "Errors",          proc {|d| error_count(d["stats"]["status"]) }],
-        ["mean-duration", "Mean Latency",    proc {|d| d["stats"]["duration"]["mean"] }   ],
-        ["max-duration",  "Max Latency",     proc {|d| d["stats"]["duration"]["max"] }    ],
-        ["max-conc",      "Max Concurrency", proc {|d| d["conc"]["max"] }                 ],
-      ].each do |bind, sub_title, fetch|
-        stats_time_series(box["charts"], bind, "#{title} #{sub_title}", data["series"], reach_in: fetch)
-      end
+      table
     end
 
     def generate
       str = File.read("views/index.html")
-      databox = {title: "All frontends", breadcrumbs: [{databox: "global", text: "All"}]}
-      boxes(databox, "All frontends", @stats["global"])
-      table(databox, @stats["frontends"], 
-              sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
-              reach_in: proc {|d| d["global"]["all"] },
-              link: proc {|n,i| "frontend-#{n}" })
-      js = [""]
-      js << "Hawat.databoxes[\"global\"] = #{databox.to_json}"
-      js << "$(document).ready(function() { Hawat.displayDatabox('global') })"
+      databoxes = {}
+      databoxes["global"] = {title: "All frontends", breadcrumbs: [{databox: "global", text: "All"}]}
+      databoxes["global"].merge!(boxes("All frontends", @stats["global"]))
+      databoxes["global"]["table"] = table(@stats["frontends"], 
+                                  sort_field: proc {|d| d["global"]["all"]["stats"]["count"]}, 
+                                  reach_in: proc {|d| d["global"]["all"] },
+                                  link: proc {|n,i| "frontend-#{n}" })
 
       @stats["frontends"].each do |name, data|
-        databox = {title: "Frontend #{name}", breadcrumbs: [{databox: "global", text: "All"}, {databox: "frontend-#{name}", text: "#{name}"}]}
-        boxes(databox, name, data["global"])
+        databoxes["frontend-#{name}"] = {
+          title: "Frontend #{name}", 
+          breadcrumbs: [{databox: "global", text: "All"}, {databox: "frontend-#{name}", text: "#{name}"}]
+        }
+        databoxes["frontend-#{name}"].merge!(boxes(name, data["global"]))
+
         new_data = {}
         data["paths"].each do |path, methods|
           methods.each do |method, data|
             new_data[[method, path]] = data
           end
         end
-        table(databox, new_data,
-              sort_field: proc {|d| d["all"]["stats"]["count"] },
-              reach_in: proc {|d| d["all"] },
-              link: proc {|n,i| "frontend-#{name}-path-#{i}" })
-
-        js << "Hawat.databoxes[\"frontend-#{name}\"] = #{databox.to_json}"
+        databoxes["frontend-#{name}"]["table"] = 
+           table(new_data,
+                   sort_field: proc {|d| d["all"]["stats"]["count"] },
+                   reach_in: proc {|d| d["all"] },
+                   link: proc {|n,i| "frontend-#{name}-path-#{i}" })
 
         i = 0
         sorted_data = new_data.to_a.sort_by {|_,d| d["all"]["stats"]["count"]}.reverse
@@ -105,12 +112,14 @@ class Hawat
               {databox: "frontend-#{name}-path-#{i}", text: "#{method} #{path}"}
             ]
           }
-          boxes(databox, "#{name}, #{method} #{path}", path_data)
-          js << "Hawat.databoxes[\"frontend-#{name}-path-#{i}\"] = #{databox.to_json}"
+          databox.merge!(boxes("#{name} / #{method} #{path}", path_data))
           i += 1
         end
       end
 
+      js = [""]
+      js << "Hawat.databoxes = #{JSON.pretty_generate(databoxes)}"
+      js << "$(document).ready(function() { Hawat.displayDatabox('global') })"
       File.open("output.html", "w") do |fout|
         str = str.sub("JAVASCRIPT", js.join("\n"))
         fout.puts str
