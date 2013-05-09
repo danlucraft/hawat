@@ -44,11 +44,19 @@
               $(data["table"]).each(function(i, row) {
                 var tr = $("<tr/>")
                 $(row).each(function(i, column) {
-                  if (column.showDatabox) {
-                    tr.append("<td><a onclick='Hawat.displayDatabox(\"" + column.showDatabox + "\")'>" + column.content + "</a></td>")
-                  } else {
-                    tr.append("<td>" + column.content + "</td>")
+                  var tag = "<td"
+                  if (column.style) {
+                    tag = tag + " style=\"" + column.style + "\""
                   }
+                  tag = tag + ">"
+
+                  if (column.showDatabox) {
+                    tag = tag + "<a onclick='Hawat.displayDatabox(\"" + column.showDatabox + "\")'>" + column.content + "</a>"
+                  } else {
+                    tag = tag + column.content
+                  }
+                  tag = tag + "</td>"
+                  tr.append(tag)
                 })
                 tbody.append(tr)
               })
@@ -68,7 +76,7 @@
           data.addColumn('number', 'Requests')
           data.addRows(chartData["series"])
           var options = {'title':chartData["title"],
-                         'width':900,
+                         'width':1020,
                          'height':300};
           Hawat.chart.draw(data, options);
         }
@@ -80,8 +88,8 @@
         Hawat.chart = new google.visualization.LineChart(document.getElementById('chart'));
         var data = new google.visualization.DataTable();
         var options = {'title':'#{title}',
-                       'width':900,
-                       'height':300};
+                       'width': 1020,
+                       'height': 300};
         Hawat.chart.draw(data, options);
       })
 
@@ -94,21 +102,20 @@
         font-family: Helvetica;
         padding: 0;
         margin: 0;
-        text-align: center;
         color: #333;
       }
 
-      #container {
-        padding-left: 50px;
-        display: inline-block;
-        text-align: left;
+      .container {
+        width: 1030px;
+        margin-left: auto;
+        margin-right: auto;
       }
 
       h1 {
         display: block;
         background-color: #EEE;
-        padding: 20px;
-        padding-left: 50px;
+        padding-top: 20px;
+        padding-bottom: 20px;
         margin: 0;
         margin-bottom: 20px;
       }
@@ -116,11 +123,13 @@
       #bigstats {
         font-size: 1.2em;
         text-align: center;
+        margin-bottom: 20px;
       }
 
       #chart {
         margin-left: auto;
         margin-right: auto;
+        margin-bottom: 40px;
       }
 
       #bigstats a {
@@ -139,13 +148,26 @@
         font-size: 0.5em;
       }
 
+      table {
+        width: 100%;
+        padding-bottom:20px;
+      }
+      
+      table th {
+        border-bottom: 2px solid #555;
+      }
+
     </style>
   </head>
 
   <body>
-    <div id=container>
-      <h1><a name=top>Hawat</a></h1>
+    <h1>
+      <div class=container>
+        <a name=top>Hawat</a>
+      </div>
+    </h1>
 
+    <div class=container>
       <div id=breadcrumbs>
         <h2>All</h2>
       </div>

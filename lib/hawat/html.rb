@@ -55,7 +55,7 @@ class Hawat
       sorted_data.each_with_index do |(name, data), i|
         data = reach_in[data]
         row = []
-        row << {showDatabox: link[name,i], content: [*name].join(" ")}
+        row << {showDatabox: link[name,i], content: [*name].join(" "), style: "font-family: monospace;"}
 
         [
           data["stats"]["count"],
