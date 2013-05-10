@@ -11,6 +11,7 @@ import (
   "strconv"
   "encoding/json"
   "strings"
+  "time"
 )
 
 // example 
@@ -36,7 +37,8 @@ func (h *Hawat) process() {
   node := newNamedAggregate(map[string]Node {
             "methods": newMethodAggregate(func()Node { return newStatisticsTerminal() }),
             "paths":   newPathAggregate(func()Node { return newStatisticsTerminal() }),
-            "global": newStatisticsTerminal()})
+            "global": newStatisticsTerminal(),
+            "series": newTimeBucketerAggregate(5, func()Node { return newStatisticsTerminal() })})
 
   for {
     line, err := reader.ReadString('\n')
@@ -53,6 +55,7 @@ func (h *Hawat) process() {
 }
 
 type LineData []string
+
 func (md LineData) haproxyHost() string { return md[2] }
 func (md LineData) haproxyPid() string { return  md[3] }
 func (md LineData) haproxyIp() string { return  md[4] }
@@ -68,6 +71,7 @@ func (md LineData) tq() string { return md[13] }
 func (md LineData) tw() string { return md[14] }
 func (md LineData) tc() string { return md[15] }
 func (md LineData) tr() string { return md[16] }
+func (md LineData) totalTimeDuration() time.Duration { d,_ := time.ParseDuration(md[17] + "ms"); return d }
 func (md LineData) totalTime() int { i, _ := strconv.Atoi(md[17]); return i }
 func (md LineData) status() string { return md[18] }
 func (md LineData) bytes() string { return md[19] }
@@ -82,13 +86,21 @@ func (md LineData) backendQueue() string { return md[27] }
 func (md LineData) httpMethod() string { return md[28] }
 func (md LineData) path() string { return md[29] }
 
+func (md LineData) Accepted() time.Time {
+  t,_ := time.Parse("02/Jan/2006:15:04:05.000", md.day() + "/" + md.month() + "/" + md.year() + ":" + md.timestamp())
+  return t
+}
+
+func (md LineData) Closed() time.Time {
+  a := md.Accepted()
+  return a.Add(md.totalTimeDuration())
+}
+
 type Node interface {
   Update(LineData)
   Collect()         map[string]interface{}
   Merge(Node)
   Children()        map[string]Node
-  Data()            map[string]interface{}
-  Terminal()        Node
 }
 
 type NamedAggregate struct {
@@ -105,16 +117,24 @@ type FrontendAggregate struct {
   childGenerator func()Node
 }
 
-type TimeBucketerAggregate struct {
-  _children       map[int]Node
-  childGenerator func()Node
-}
-
 type PathAggregate struct {
   count          int
   terminal       Node
   _children       map[string]Node
   terminalGenerator func()Node
+}
+
+type TimeBucket struct {
+  start   time.Time
+  end     time.Time
+  child   Node
+}
+
+type TimeBucketerAggregate struct {
+  bucketLength   int
+  buckets        map[int]TimeBucket
+  childGenerator func()Node
+  startOfDay     time.Time
 }
 
 type StatisticsTerminal struct {
@@ -137,8 +157,6 @@ func newNamedAggregate(_children map[string]Node) *NamedAggregate {
 }
 
 func (n *NamedAggregate) Children() map[string]Node { return n._children }
-func (n *NamedAggregate) Data() map[string]interface{} { return nil }
-func (n *NamedAggregate) Terminal() Node { return nil }
 
 func (n *NamedAggregate) Update(l LineData) {
   for _, child := range n._children {
@@ -172,8 +190,6 @@ func newMethodAggregate(childGenerator func()Node) *MethodAggregate {
 }
 
 func (n *MethodAggregate) Children() map[string]Node        { return n._children }
-func (n *MethodAggregate) Data()     map[string]interface{} { return nil }
-func (n *MethodAggregate) Terminal() Node { return nil }
 
 func (n *MethodAggregate) Update(l LineData) {
   child, ok := n._children[l.httpMethod()]
@@ -210,8 +226,6 @@ func newPathAggregate(terminalGenerator func()Node) *PathAggregate {
 }
 
 func (n *PathAggregate) Children() map[string]Node        { return n._children }
-func (n *PathAggregate) Data()     map[string]interface{} { return map[string]interface{} {"count": n.count} }
-func (n *PathAggregate) Terminal() Node                  { return n.terminal }
 
 func (n *PathAggregate) Update(l LineData) {
   path := l.path()
@@ -263,8 +277,9 @@ func (n *PathAggregate) Reduce() {
   }
 }
 
-func (n *PathAggregate) Merge(other Node) {
-  n.count += other.Data()["count"].(int)
+func (n *PathAggregate) Merge(otherNode Node) {
+  other := otherNode.(*PathAggregate)
+  n.count += other.count
   for slug, otherChild := range(other.Children()) {
     thisChild, ok := n._children[slug]
     if !ok {
@@ -273,9 +288,65 @@ func (n *PathAggregate) Merge(other Node) {
     }
     thisChild.Merge(otherChild)
   }
-  if other.Terminal() != nil {
-    n.terminal.Merge(other.Terminal())
+  if other.terminal != nil {
+    n.terminal.Merge(other.terminal)
   }
+}
+
+// TimeBucketerAggregate
+
+func newTimeBucketerAggregate(bucketLength int, childGenerator func()Node ) *TimeBucketerAggregate {
+  return &TimeBucketerAggregate{bucketLength, make(map[int]TimeBucket), childGenerator, time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
+func (n *TimeBucketerAggregate) Children() map[string]Node  { return nil }
+
+func (n *TimeBucketerAggregate) Update(l LineData) {
+  closed := l.Closed()
+  startOfDay := n.startOfDay
+  if startOfDay.Year() == 1970 {
+    startOfDay = time.Date(closed.Year(), closed.Month(), closed.Day(), 0, 0, 0, 0, startOfDay.Location())
+    n.startOfDay = startOfDay
+  }
+
+  closedSecsToday := closed.Unix() - startOfDay.Unix()
+  bucketIx := int(int(closedSecsToday)/n.bucketLength)
+  bucket, ok := n.buckets[bucketIx]
+  if !ok {
+    start, _ := time.ParseDuration(strconv.Itoa(bucketIx*n.bucketLength) + "s")
+    end, _ := time.ParseDuration(strconv.Itoa((bucketIx + 1)*n.bucketLength) + "s")
+    bucket = TimeBucket{startOfDay.Add(start),
+                        startOfDay.Add(end),
+                        n.childGenerator()}
+    n.buckets[bucketIx] = bucket
+  }
+  bucket.child.Update(l)
+}
+
+func (n *TimeBucketerAggregate) Collect() map[string]interface{} {
+  result := map[string]interface{} {}
+  for _, bucket := range(n.buckets) {
+    result[bucket.start.Format(time.RubyDate)] = bucket.child.Collect()
+  }
+  return result
+}
+
+func (n *TimeBucketerAggregate) Merge(otherNode Node) {
+  other := otherNode.(*TimeBucketerAggregate)
+  for bucketIx, otherBucket := range other.buckets {
+    if thisBucket, ok := n.buckets[bucketIx]; ok {
+      thisBucket.Merge(&otherBucket)
+    } else {
+      n.buckets[bucketIx] = otherBucket
+    }
+  }
+}
+
+func (b TimeBucket) Merge(other *TimeBucket) {
+  if !b.start.Equal(other.start) || b.end.Equal(other.end) {
+    panic("bucket starts don't match")
+  }
+  b.child.Merge(other.child)
 }
 
 // StatisticsTerminal
@@ -285,8 +356,6 @@ func newStatisticsTerminal() *StatisticsTerminal {
 }
 
 func (n *StatisticsTerminal) Children() map[string]Node        { return nil }
-func (n *StatisticsTerminal) Data()     map[string]interface{} { return nil }
-func (n *StatisticsTerminal) Terminal() Node                  { return nil }
 
 func (n *StatisticsTerminal) Update(l LineData) {
   n.count++
