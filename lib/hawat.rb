@@ -191,19 +191,6 @@ class Hawat
       end
 
       def reduce
-        #new_children = {"*" => PathNode.new(@terminal_generator) }
-        #@children.each do |slug, node|
-          #if node.count < @count/19
-            #new_children["*"].merge(node)
-          #else
-            #new_children[slug] = node
-          #end
-        #end
-        #unless new_children["*"].count > 0
-          #new_children.delete("*")
-        #end
-        #@children = new_children
-        
         if @children.length > 15
           new_children = {"*" => PathNode.new(@terminal_generator) }
           @children.each do |slug, node|
