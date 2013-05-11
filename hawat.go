@@ -18,7 +18,7 @@ import (
 // Apr 28 00:00:15 dc1-live-lb1.srv.songkick.net haproxy[32647]: 10.32.75.139:53757 [28/Apr/2013:00:00:15.885] skweb skweb/dc1-live-frontend6_3000 0/0/9/9/20 200 5732 - - ---- 104/39/39/5/0 0/0 \"GET /favicon.ico HTTP/1.1\"\n"
 //LINE_RE = /^(\w+ \d+ \d+:\d+:\d+) (\S+) haproxy\[(\d+)\]: ([\d\.]+):(\d+) \[(\d+)\/(\w+)\/(\d+):(\d+:\d+:\d+\.\d+)\] ([^ ]+) ([^ ]+)\/([^ ]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+) (\d+) - - ([\w-]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+)\/(\d+) "(\w+) ([^ ]+)/
 
-var LineRegex = regexp.MustCompile("^(\\w+ \\d+ \\d+:\\d+:\\d+) (\\S+) haproxy\\[(\\d+)\\]: ([\\d\\.]+):(\\d+) \\[(\\d+)\\/(\\w+)\\/(\\d+):(\\d+:\\d+:\\d+\\.\\d+)\\] ([^ ]+) ([^ ]+)\\/([^ ]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (\\d+) (\\d+) - - ([\\w-]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (\\d+)\\/(\\d+) \"(\\w+) ([^ ]+)")
+var LineRegex = regexp.MustCompile("^(\\w+\\s+\\d+ \\d+:\\d+:\\d+) (\\S+) haproxy\\[(\\d+)\\]: ([\\d\\.]+):(\\d+) \\[(\\d+)\\/(\\w+)\\/(\\d+):(\\d+:\\d+:\\d+\\.\\d+)\\] ([^ ]+) ([^ ]+)\\/([^ ]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (-?\\d+) (-?\\d+) - - ([\\w-]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (\\d+)\\/(\\d+) \"(\\w+) ([^ ]+)")
 
 type Hawat struct {
   filePath string
@@ -30,28 +30,65 @@ func newHawat(filePath string) *Hawat {
   return h
 }
 
+func newDefaultTerminal() *NamedAggregate {
+  return newNamedAggregate(map[string]Node {
+            "stats": newStatisticsTerminal(),
+            "conc": newConcurrencyTerminal(),
+         })
+}
+
+const TimeBucketLength = 300
+
 func (h *Hawat) process() {
   file, _ := os.Open(h.filePath)
   reader := bufio.NewReader(file)
 
+  frontends := newFrontendAggregate(func()Node {
+    return newNamedAggregate(map[string]Node {
+      "global": newNamedAggregate(map[string]Node {
+        "all": newDefaultTerminal(),
+        "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
+      "paths": newPathAggregate(func()Node {
+        return newMethodAggregate(func() Node {
+          return newNamedAggregate(map[string]Node {
+            "all": newDefaultTerminal(),
+            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal()})})})})})})
+
   node := newNamedAggregate(map[string]Node {
-            "methods": newMethodAggregate(func()Node { return newStatisticsTerminal() }),
-            "paths":   newPathAggregate(func()Node { return newStatisticsTerminal() }),
-            "global": newStatisticsTerminal(),
-            "series": newTimeBucketerAggregate(5, func()Node { return newStatisticsTerminal() })})
+                "global": newNamedAggregate(map[string]Node {
+                  "all": newDefaultTerminal(),
+                  "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
+                "frontends": frontends})
+  i := 0
 
   for {
+    i++
     line, err := reader.ReadString('\n')
     if err == io.EOF {
       break
     } else {
-      match := LineRegex.FindStringSubmatch(line)
-      ld := LineData(match)
-      node.Update(ld)
+      processLine(line, node)
     }
   }
   b, _ := json.MarshalIndent(node.Collect(), "", "  ")
   fmt.Printf(string(b) + "\n")
+}
+
+func processLine(line string, node Node) {
+  defer func() {
+    if x := recover(); x != nil {
+      fmt.Println("panic")
+      fmt.Println(line)
+    }
+  }()
+  match := LineRegex.FindStringSubmatch(line)
+  if match != nil {
+    ld := LineData(match)
+    node.Update(ld)
+  } else {
+    fmt.Println("didn't match:")
+    fmt.Println(line)
+  }
 }
 
 type LineData []string
@@ -107,7 +144,8 @@ type NamedAggregate struct {
   _children map[string]Node
 }
 
-type MethodAggregate struct {
+type SplitterAggregate struct {
+  splitter       func(LineData)string
   _children       map[string]Node
   childGenerator func()Node
 }
@@ -146,7 +184,7 @@ type StatisticsTerminal struct {
 
 type ConcurrencyTerminal struct {
   maxConcurrency int
-  liveRequests   []int
+  liveRequests   map[time.Time]int
 }
 
 
@@ -185,22 +223,34 @@ func (n *NamedAggregate) Merge(other Node) {
 
 // MethodAggregate
 
-func newMethodAggregate(childGenerator func()Node) *MethodAggregate {
-  return &MethodAggregate{make(map[string]Node), childGenerator}
+func newMethodAggregate(childGenerator func()Node) *SplitterAggregate {
+  return newSplitterAggregate(func(ld LineData)string { return ld.httpMethod() }, childGenerator)
 }
 
-func (n *MethodAggregate) Children() map[string]Node        { return n._children }
+// FrontendAggregate
 
-func (n *MethodAggregate) Update(l LineData) {
-  child, ok := n._children[l.httpMethod()]
+func newFrontendAggregate(childGenerator func()Node) *SplitterAggregate {
+  return newSplitterAggregate(func(ld LineData)string { return ld.frontend() }, childGenerator)
+}
+
+// SplitterAggregate
+
+func newSplitterAggregate(splitter func(LineData)string, childGenerator func()Node) *SplitterAggregate {
+  return &SplitterAggregate{splitter, make(map[string]Node), childGenerator}
+}
+
+func (n *SplitterAggregate) Children() map[string]Node { return n._children }
+
+func (n *SplitterAggregate) Update(l LineData) {
+  child, ok := n._children[n.splitter(l)]
   if !ok {
     child = n.childGenerator()
-    n._children[l.httpMethod()] = child
+    n._children[n.splitter(l)] = child
   }
   child.Update(l)
 }
 
-func (n *MethodAggregate) Collect() map[string]interface{} {
+func (n *SplitterAggregate) Collect() map[string]interface{} {
   result := make(map[string]interface{})
   for method, child := range n._children {
     result[method] = child.Collect()
@@ -208,7 +258,7 @@ func (n *MethodAggregate) Collect() map[string]interface{} {
   return result
 }
 
-func (n *MethodAggregate) Merge(other Node) {
+func (n *SplitterAggregate) Merge(other Node) {
   for method, otherChild := range(other.Children()) {
     thisChild, ok := n._children[method]
     if ok {
@@ -343,8 +393,8 @@ func (n *TimeBucketerAggregate) Merge(otherNode Node) {
 }
 
 func (b TimeBucket) Merge(other *TimeBucket) {
-  if !b.start.Equal(other.start) || b.end.Equal(other.end) {
-    panic("bucket starts don't match")
+  if !b.start.Equal(other.start) || !b.end.Equal(other.end) {
+    panic("bucket start or end aren't equal")
   }
   b.child.Merge(other.child)
 }
@@ -401,6 +451,42 @@ func (n *StatisticsTerminal) Merge(otherNode Node) {
   }
 }
 
+// ConcurrencyTerminal
+
+func newConcurrencyTerminal() *ConcurrencyTerminal {
+  return &ConcurrencyTerminal{0, make(map[time.Time]int)}
+}
+
+func (n *ConcurrencyTerminal) Children() map[string]Node { return nil }
+
+func (n *ConcurrencyTerminal) Update(l LineData) {
+  accepted := l.Accepted()
+  closed   := l.Closed()
+  conc := 0
+  for t, count := range(n.liveRequests) {
+    if t.After(closed) {
+      delete(n.liveRequests, t)
+    } else {
+      conc += count
+    }
+  }
+  n.liveRequests[accepted]++
+  conc++
+  if conc > n.maxConcurrency {
+    n.maxConcurrency = conc
+  }
+}
+
+func (n *ConcurrencyTerminal) Collect() map[string]interface{} {
+  return map[string]interface{} {"max": n.maxConcurrency}
+}
+
+func (n *ConcurrencyTerminal) Merge(otherNode Node) {
+  other := otherNode.(*ConcurrencyTerminal)
+  if other.maxConcurrency > n.maxConcurrency {
+    n.maxConcurrency = other.maxConcurrency
+  }
+}
 func usage() {
   fmt.Printf("usage: hawat LOG_FILE\n")
 }
