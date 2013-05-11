@@ -2,14 +2,15 @@
 package main
 
 import (
+  "bufio"
+  "encoding/json"
+  "flag"
   "fmt"
   "io"
-  "flag"
-  "bufio"
+  "math/rand"
   "os"
   "regexp"
   "strconv"
-  "encoding/json"
   "strings"
   "time"
 )
@@ -77,8 +78,8 @@ func (h *Hawat) process() {
 func processLine(line string, node Node) {
   defer func() {
     if x := recover(); x != nil {
-      fmt.Println("panic")
-      fmt.Println(line)
+      //fmt.Println("panic")
+      //fmt.Println(line)
     }
   }()
   match := LineRegex.FindStringSubmatch(line)
@@ -86,8 +87,8 @@ func processLine(line string, node Node) {
     ld := LineData(match)
     node.Update(ld)
   } else {
-    fmt.Println("didn't match:")
-    fmt.Println(line)
+    //fmt.Println("didn't match:")
+    //fmt.Println(line)
   }
 }
 
@@ -156,10 +157,11 @@ type FrontendAggregate struct {
 }
 
 type PathAggregate struct {
-  count          int
-  terminal       Node
-  _children       map[string]Node
+  count             int
+  terminal          Node
+  _children         map[string]Node
   terminalGenerator func()Node
+  depth             int
 }
 
 type TimeBucket struct {
@@ -272,7 +274,11 @@ func (n *SplitterAggregate) Merge(other Node) {
 // PathAggregate
 
 func newPathAggregate(terminalGenerator func()Node) *PathAggregate {
-  return &PathAggregate{0, terminalGenerator(), make(map[string]Node), terminalGenerator}
+  return newPathAggregateWithDepth(terminalGenerator, 0)
+}
+
+func newPathAggregateWithDepth(terminalGenerator func()Node, depth int) *PathAggregate {
+  return &PathAggregate{0, terminalGenerator(), make(map[string]Node), terminalGenerator, depth}
 }
 
 func (n *PathAggregate) Children() map[string]Node        { return n._children }
@@ -287,12 +293,22 @@ func (n *PathAggregate) Update1(bits []string, l LineData) {
   n.count++
   if len(bits) > 1 {
     name := bits[0]
-    node, ok := n._children[name].(*PathAggregate)
+    node, ok := n._children["*"]
     if !ok {
-      node = newPathAggregate(n.terminalGenerator)
-      n._children[name] = node
+      node, ok = n._children[name]
+      if rand.Int31n(100) < 10 {
+        n.Reduce()
+      }
     }
-    node.Update1(bits[1:], l)
+
+    var child *PathAggregate
+    if !ok {
+      child = newPathAggregateWithDepth(n.terminalGenerator, n.depth + 1)
+      n._children[name] = child
+    } else {
+      child = node.(*PathAggregate)
+    }
+    child.Update1(bits[1:], l)
   } else {
     n.terminal.Update(l)
   }
@@ -315,15 +331,20 @@ func (n *PathAggregate) Collect1(path string, result map[string]interface{}) {
 }
 
 func (n *PathAggregate) Reduce() {
-  if len(n._children) > 15 {
-    newChildren := map[string]Node { "*": newPathAggregate(n.terminalGenerator) }
-    for _, child := range(n._children) {
-      newChildren["*"].Merge(child)
-    }
-    n._children = newChildren
+  if n.depth == 0 {
+    return
   }
-  for _, child := range(n._children) {
-    child.(*PathAggregate).Reduce()
+  if _, ok := n._children["*"]; !ok {
+    if len(n._children) > 15 {
+      newChildren := map[string]Node { "*": newPathAggregate(n.terminalGenerator) }
+      for _, child := range(n._children) {
+        newChildren["*"].Merge(child)
+      }
+      n._children = newChildren
+    }
+    for _, child := range(n._children) {
+      child.(*PathAggregate).Reduce()
+    }
   }
 }
 
