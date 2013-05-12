@@ -14,7 +14,7 @@ import (
   "strconv"
   "strings"
   "time"
-  "ring"
+  //"ring"
 
   "github.com/glenn-brown/golang-pkg-pcre/src/pkg/pcre"
 )
@@ -206,8 +206,8 @@ type StatisticsTerminal struct {
 
 type ConcurrencyTerminal struct {
   maxConcurrency   int
-  liveRequests     *ring.RingInt64
-  //liveRequests     map[time.Time]int
+  //liveRequests     *ring.RingInt64
+  liveRequests     map[int]int
 }
 
 // NamedAggregate
@@ -495,34 +495,34 @@ func (n *StatisticsTerminal) Merge(otherNode Node) {
 // ConcurrencyTerminal
 
 func newConcurrencyTerminal() *ConcurrencyTerminal {
-  return &ConcurrencyTerminal{0, ring.NewInt64(10000)}
-  //return &ConcurrencyTerminal{0, make(map[time.Time]int)}
+  //return &ConcurrencyTerminal{0, ring.NewInt64(10000)}
+  return &ConcurrencyTerminal{0, make(map[int]int)}
 }
 
 func (n *ConcurrencyTerminal) Children() map[string]Node { return nil }
 
 func (n *ConcurrencyTerminal) Update(l Line) {
-  accepted := l.Accepted()
-  closed   := l.Closed()
+  accepted := int(l.Accepted().UnixNano()/1000000)
+  closed   := int(l.Closed().UnixNano()/1000000)
 
-  n.liveRequests.DeleteLessEq(-1*closed.UnixNano())
-  n.liveRequests.Add(-1*accepted.UnixNano())
-  if n.liveRequests.Length() > n.maxConcurrency {
-    n.maxConcurrency = n.liveRequests.Length()
+  //n.liveRequests.DeleteLessEq(-1*closed.UnixNano())
+  //n.liveRequests.Add(-1*accepted.UnixNano())
+  //if n.liveRequests.Length() > n.maxConcurrency {
+    //n.maxConcurrency = n.liveRequests.Length()
+  //}
+
+  conc := 0
+  for t, count := range(n.liveRequests) {
+    if t > closed {
+      delete(n.liveRequests, t)
+    } else {
+      conc += count
+    }
   }
-
-  //conc := 0
-  //for t, count := range(n.liveRequests) {
-    //if t.After(closed) {
-      //delete(n.liveRequests, t)
-    //} else {
-      //conc += count
-    //}
-  //}
-  //n.liveRequests[accepted]++
-  //if conc > n.maxConcurrency {
-    //n.maxConcurrency = conc
-  //}
+  n.liveRequests[accepted]++
+  if conc > n.maxConcurrency {
+    n.maxConcurrency = conc
+  }
 }
 
 func (n *ConcurrencyTerminal) Collect() map[string]interface{} {
@@ -566,7 +566,7 @@ func (h *Hawat) process() {
         return newMethodAggregate(func() Node {
           return newNamedAggregate(map[string]Node {
             "all": newDefaultTerminal(),
-            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newStatisticsTerminal()})})})})})})
+            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal()})})})})})})
 
   node := newNamedAggregate(map[string]Node {
                 "global": newNamedAggregate(map[string]Node {
