@@ -72,7 +72,7 @@ func (h *Hawat) process() {
     }
   }
   b, _ := json.MarshalIndent(node.Collect(), "", "  ")
-  fmt.Printf(string(b) + "\n")
+  fmt.Print(string(b) + "\n")
 }
 
 func processLine(line string, node Node) {
