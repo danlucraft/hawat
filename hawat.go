@@ -10,16 +10,21 @@ import (
   "math/rand"
   "os"
   "regexp"
+  "runtime/pprof"
   "strconv"
   "strings"
   "time"
+
+  "github.com/glenn-brown/golang-pkg-pcre/src/pkg/pcre"
 )
 
 // example 
 // Apr 28 00:00:15 dc1-live-lb1.srv.songkick.net haproxy[32647]: 10.32.75.139:53757 [28/Apr/2013:00:00:15.885] skweb skweb/dc1-live-frontend6_3000 0/0/9/9/20 200 5732 - - ---- 104/39/39/5/0 0/0 \"GET /favicon.ico HTTP/1.1\"\n"
 //LINE_RE = /^(\w+ \d+ \d+:\d+:\d+) (\S+) haproxy\[(\d+)\]: ([\d\.]+):(\d+) \[(\d+)\/(\w+)\/(\d+):(\d+:\d+:\d+\.\d+)\] ([^ ]+) ([^ ]+)\/([^ ]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+) (\d+) - - ([\w-]+) (-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+)\/(-?\d+) (\d+)\/(\d+) "(\w+) ([^ ]+)/
 
-var LineRegex = regexp.MustCompile("^(\\w+\\s+\\d+ \\d+:\\d+:\\d+) (\\S+) haproxy\\[(\\d+)\\]: ([\\d\\.]+):(\\d+) \\[(\\d+)\\/(\\w+)\\/(\\d+):(\\d+:\\d+:\\d+\\.\\d+)\\] ([^ ]+) ([^ ]+)\\/([^ ]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (-?\\d+) (-?\\d+) - - ([\\w-]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (\\d+)\\/(\\d+) \"(\\w+) ([^ ]+)")
+var LineRegexSource = "^(\\w+\\s+\\d+ \\d+:\\d+:\\d+) (\\S+) haproxy\\[(\\d+)\\]: ([\\d\\.]+):(\\d+) \\[(\\d+)\\/(\\w+)\\/(\\d+):(\\d+:\\d+:\\d+\\.\\d+)\\] ([^ ]+) ([^ ]+)\\/([^ ]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (-?\\d+) (-?\\d+) - - ([\\w-]+) (-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+)\\/(-?\\d+) (\\d+)\\/(\\d+) \"(\\w+) ([^ ]+)"
+var LineRegex = regexp.MustCompile(LineRegexSource)
+var LineRegexPCRE = pcre.MustCompile(LineRegexSource, 0)
 
 type Hawat struct {
   filePath string
@@ -82,14 +87,106 @@ func processLine(line string, node Node) {
       //fmt.Println(line)
     }
   }()
+  processLinePCRE(line, node)
+}
+
+func processLineNative(line string, node Node) {
   match := LineRegex.FindStringSubmatch(line)
   if match != nil {
     ld := LineData(match)
-    node.Update(ld)
+    ld.day()
+    //node.Update(ld)
   } else {
     //fmt.Println("didn't match:")
     //fmt.Println(line)
   }
+}
+
+func processLinePCRE(line string, node Node) {
+  if matcher := LineRegexPCRE.MatcherString(line, 0); matcher != nil {
+    ld := LineDataPCRE(*matcher)
+    node.Update(&ld)
+  }
+}
+
+type Line interface {
+  haproxyHost() string
+  haproxyPid() string
+  haproxyIp() string
+  haproxyPort() string
+  day() string
+  month() string
+  year() string
+  timestamp() string
+  frontend() string
+  backend() string
+  server() string
+  tq() string
+  tw() string
+  tc() string
+  tr() string
+  totalTimeDuration() time.Duration
+  totalTime() int
+  status() string
+  bytes() string
+  terminationState() string
+  actconn() string
+  feconn() string
+  beconn() string
+  srvConn() string
+  retries() string
+  srvQueue() string
+  backendQueue() string
+  httpMethod() string
+  path() string
+  Accepted() time.Time
+  Closed() time.Time
+}
+
+type LineDataPCRE pcre.Matcher
+
+func (md *LineDataPCRE) GroupString(i int) string {
+  matcher := pcre.Matcher(*md)
+  return matcher.GroupString(i)
+}
+func (md *LineDataPCRE) haproxyHost() string { return md.GroupString(2) }
+func (md *LineDataPCRE) haproxyPid() string { return  md.GroupString(3) }
+func (md *LineDataPCRE) haproxyIp() string { return  md.GroupString(4) }
+func (md *LineDataPCRE) haproxyPort() string { return  md.GroupString(5) }
+func (md *LineDataPCRE) day() string { return md.GroupString(6) }
+func (md *LineDataPCRE) month() string { return md.GroupString(7) }
+func (md *LineDataPCRE) year() string { return md.GroupString(8) }
+func (md *LineDataPCRE) timestamp() string { return md.GroupString(9) }
+func (md *LineDataPCRE) frontend() string { return md.GroupString(10) }
+func (md *LineDataPCRE) backend() string { return md.GroupString(11) }
+func (md *LineDataPCRE) server() string { return md.GroupString(12) }
+func (md *LineDataPCRE) tq() string { return md.GroupString(13) }
+func (md *LineDataPCRE) tw() string { return md.GroupString(14) }
+func (md *LineDataPCRE) tc() string { return md.GroupString(15) }
+func (md *LineDataPCRE) tr() string { return md.GroupString(16) }
+func (md *LineDataPCRE) totalTimeDuration() time.Duration { d,_ := time.ParseDuration(md.GroupString(17) + "ms"); return d }
+func (md *LineDataPCRE) totalTime() int { i, _ := strconv.Atoi(md.GroupString(17)); return i }
+func (md *LineDataPCRE) status() string { return md.GroupString(18) }
+func (md *LineDataPCRE) bytes() string { return md.GroupString(19) }
+func (md *LineDataPCRE) terminationState() string { return md.GroupString(20) }
+func (md *LineDataPCRE) actconn() string { return md.GroupString(21) }
+func (md *LineDataPCRE) feconn() string { return md.GroupString(22) }
+func (md *LineDataPCRE) beconn() string { return md.GroupString(23) }
+func (md *LineDataPCRE) srvConn() string { return md.GroupString(24) }
+func (md *LineDataPCRE) retries() string { return md.GroupString(25) }
+func (md *LineDataPCRE) srvQueue() string { return md.GroupString(26) }
+func (md *LineDataPCRE) backendQueue() string { return md.GroupString(27) }
+func (md *LineDataPCRE) httpMethod() string { return md.GroupString(28) }
+func (md *LineDataPCRE) path() string { return md.GroupString(29) }
+
+func (md *LineDataPCRE) Accepted() time.Time {
+  t,_ := time.Parse("02/Jan/2006:15:04:05.000", md.day() + "/" + md.month() + "/" + md.year() + ":" + md.timestamp())
+  return t
+}
+
+func (md *LineDataPCRE) Closed() time.Time {
+  a := md.Accepted()
+  return a.Add(md.totalTimeDuration())
 }
 
 type LineData []string
@@ -135,7 +232,7 @@ func (md LineData) Closed() time.Time {
 }
 
 type Node interface {
-  Update(LineData)
+  Update(Line)
   Collect()         map[string]interface{}
   Merge(Node)
   Children()        map[string]Node
@@ -146,7 +243,7 @@ type NamedAggregate struct {
 }
 
 type SplitterAggregate struct {
-  splitter       func(LineData)string
+  splitter       func(Line)string
   _children       map[string]Node
   childGenerator func()Node
 }
@@ -198,7 +295,7 @@ func newNamedAggregate(_children map[string]Node) *NamedAggregate {
 
 func (n *NamedAggregate) Children() map[string]Node { return n._children }
 
-func (n *NamedAggregate) Update(l LineData) {
+func (n *NamedAggregate) Update(l Line) {
   for _, child := range n._children {
     child.Update(l)
   }
@@ -226,24 +323,24 @@ func (n *NamedAggregate) Merge(other Node) {
 // MethodAggregate
 
 func newMethodAggregate(childGenerator func()Node) *SplitterAggregate {
-  return newSplitterAggregate(func(ld LineData)string { return ld.httpMethod() }, childGenerator)
+  return newSplitterAggregate(func(ld Line)string { return ld.httpMethod() }, childGenerator)
 }
 
 // FrontendAggregate
 
 func newFrontendAggregate(childGenerator func()Node) *SplitterAggregate {
-  return newSplitterAggregate(func(ld LineData)string { return ld.frontend() }, childGenerator)
+  return newSplitterAggregate(func(ld Line)string { return ld.frontend() }, childGenerator)
 }
 
 // SplitterAggregate
 
-func newSplitterAggregate(splitter func(LineData)string, childGenerator func()Node) *SplitterAggregate {
+func newSplitterAggregate(splitter func(Line)string, childGenerator func()Node) *SplitterAggregate {
   return &SplitterAggregate{splitter, make(map[string]Node), childGenerator}
 }
 
 func (n *SplitterAggregate) Children() map[string]Node { return n._children }
 
-func (n *SplitterAggregate) Update(l LineData) {
+func (n *SplitterAggregate) Update(l Line) {
   child, ok := n._children[n.splitter(l)]
   if !ok {
     child = n.childGenerator()
@@ -283,13 +380,13 @@ func newPathAggregateWithDepth(terminalGenerator func()Node, depth int) *PathAgg
 
 func (n *PathAggregate) Children() map[string]Node        { return n._children }
 
-func (n *PathAggregate) Update(l LineData) {
+func (n *PathAggregate) Update(l Line) {
   path := l.path()
   bits := strings.Split(path, "/")[1:]
   n.Update1(bits, l)
 }
 
-func (n *PathAggregate) Update1(bits []string, l LineData) {
+func (n *PathAggregate) Update1(bits []string, l Line) {
   n.count++
   if len(bits) > 1 {
     name := bits[0]
@@ -372,7 +469,7 @@ func newTimeBucketerAggregate(bucketLength int, childGenerator func()Node ) *Tim
 
 func (n *TimeBucketerAggregate) Children() map[string]Node  { return nil }
 
-func (n *TimeBucketerAggregate) Update(l LineData) {
+func (n *TimeBucketerAggregate) Update(l Line) {
   closed := l.Closed()
   startOfDay := n.startOfDay
   if startOfDay.Year() == 1970 {
@@ -428,7 +525,7 @@ func newStatisticsTerminal() *StatisticsTerminal {
 
 func (n *StatisticsTerminal) Children() map[string]Node        { return nil }
 
-func (n *StatisticsTerminal) Update(l LineData) {
+func (n *StatisticsTerminal) Update(l Line) {
   n.count++
   dur := l.totalTime()
   n.totalDuration += dur
@@ -480,7 +577,7 @@ func newConcurrencyTerminal() *ConcurrencyTerminal {
 
 func (n *ConcurrencyTerminal) Children() map[string]Node { return nil }
 
-func (n *ConcurrencyTerminal) Update(l LineData) {
+func (n *ConcurrencyTerminal) Update(l Line) {
   accepted := l.Accepted()
   closed   := l.Closed()
   conc := 0
@@ -513,7 +610,18 @@ func usage() {
 }
 
 func main() {
+  var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
   flag.Parse()
+  if *cpuprofile != "" {
+    fmt.Println("profiling")
+    f, err := os.Create(*cpuprofile)
+    if err != nil {
+      fmt.Println(err)
+    }
+    pprof.StartCPUProfile(f)
+    defer pprof.StopCPUProfile()
+  }
+
   if len(flag.Args()) < 1 {
     usage()
   } else {
