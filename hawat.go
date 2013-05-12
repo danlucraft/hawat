@@ -14,6 +14,7 @@ import (
   "strconv"
   "strings"
   "time"
+  "ring"
 
   "github.com/glenn-brown/golang-pkg-pcre/src/pkg/pcre"
 )
@@ -29,84 +30,6 @@ var LineRegexPCRE = pcre.MustCompile(LineRegexSource, 0)
 type Hawat struct {
   filePath string
   node     Node
-}
-
-func newHawat(filePath string) *Hawat {
-  h := &Hawat{filePath, nil}
-  return h
-}
-
-func newDefaultTerminal() *NamedAggregate {
-  return newNamedAggregate(map[string]Node {
-            "stats": newStatisticsTerminal(),
-            "conc": newConcurrencyTerminal(),
-         })
-}
-
-const TimeBucketLength = 300
-
-func (h *Hawat) process() {
-  file, _ := os.Open(h.filePath)
-  reader := bufio.NewReader(file)
-
-  frontends := newFrontendAggregate(func()Node {
-    return newNamedAggregate(map[string]Node {
-      "global": newNamedAggregate(map[string]Node {
-        "all": newDefaultTerminal(),
-        "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
-      "paths": newPathAggregate(func()Node {
-        return newMethodAggregate(func() Node {
-          return newNamedAggregate(map[string]Node {
-            "all": newDefaultTerminal(),
-            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal()})})})})})})
-
-  node := newNamedAggregate(map[string]Node {
-                "global": newNamedAggregate(map[string]Node {
-                  "all": newDefaultTerminal(),
-                  "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
-                "frontends": frontends})
-  i := 0
-
-  for {
-    i++
-    line, err := reader.ReadString('\n')
-    if err == io.EOF {
-      break
-    } else {
-      processLine(line, node)
-    }
-  }
-  b, _ := json.MarshalIndent(node.Collect(), "", "  ")
-  fmt.Print(string(b) + "\n")
-}
-
-func processLine(line string, node Node) {
-  defer func() {
-    if x := recover(); x != nil {
-      //fmt.Println("panic")
-      //fmt.Println(line)
-    }
-  }()
-  processLinePCRE(line, node)
-}
-
-func processLineNative(line string, node Node) {
-  match := LineRegex.FindStringSubmatch(line)
-  if match != nil {
-    ld := LineData(match)
-    ld.day()
-    //node.Update(ld)
-  } else {
-    //fmt.Println("didn't match:")
-    //fmt.Println(line)
-  }
-}
-
-func processLinePCRE(line string, node Node) {
-  if matcher := LineRegexPCRE.MatcherString(line, 0); matcher != nil {
-    ld := LineDataPCRE(*matcher)
-    node.Update(&ld)
-  }
 }
 
 type Line interface {
@@ -282,8 +205,9 @@ type StatisticsTerminal struct {
 }
 
 type ConcurrencyTerminal struct {
-  maxConcurrency int
-  liveRequests   map[time.Time]int
+  maxConcurrency   int
+  liveRequests     *ring.RingInt64
+  //liveRequests     map[time.Time]int
 }
 
 // NamedAggregate
@@ -571,7 +495,8 @@ func (n *StatisticsTerminal) Merge(otherNode Node) {
 // ConcurrencyTerminal
 
 func newConcurrencyTerminal() *ConcurrencyTerminal {
-  return &ConcurrencyTerminal{0, make(map[time.Time]int)}
+  return &ConcurrencyTerminal{0, ring.NewInt64(10000)}
+  //return &ConcurrencyTerminal{0, make(map[time.Time]int)}
 }
 
 func (n *ConcurrencyTerminal) Children() map[string]Node { return nil }
@@ -579,19 +504,25 @@ func (n *ConcurrencyTerminal) Children() map[string]Node { return nil }
 func (n *ConcurrencyTerminal) Update(l Line) {
   accepted := l.Accepted()
   closed   := l.Closed()
-  conc := 0
-  for t, count := range(n.liveRequests) {
-    if t.After(closed) {
-      delete(n.liveRequests, t)
-    } else {
-      conc += count
-    }
+
+  n.liveRequests.DeleteLessEq(-1*closed.UnixNano())
+  n.liveRequests.Add(-1*accepted.UnixNano())
+  if n.liveRequests.Length() > n.maxConcurrency {
+    n.maxConcurrency = n.liveRequests.Length()
   }
-  n.liveRequests[accepted]++
-  conc++
-  if conc > n.maxConcurrency {
-    n.maxConcurrency = conc
-  }
+
+  //conc := 0
+  //for t, count := range(n.liveRequests) {
+    //if t.After(closed) {
+      //delete(n.liveRequests, t)
+    //} else {
+      //conc += count
+    //}
+  //}
+  //n.liveRequests[accepted]++
+  //if conc > n.maxConcurrency {
+    //n.maxConcurrency = conc
+  //}
 }
 
 func (n *ConcurrencyTerminal) Collect() map[string]interface{} {
@@ -606,6 +537,84 @@ func (n *ConcurrencyTerminal) Merge(otherNode Node) {
 }
 func usage() {
   fmt.Printf("usage: hawat LOG_FILE\n")
+}
+
+func newHawat(filePath string) *Hawat {
+  h := &Hawat{filePath, nil}
+  return h
+}
+
+func newDefaultTerminal() *NamedAggregate {
+  return newNamedAggregate(map[string]Node {
+            "stats": newStatisticsTerminal(),
+            "conc": newConcurrencyTerminal(),
+         })
+}
+
+const TimeBucketLength = 300
+
+func (h *Hawat) process() {
+  file, _ := os.Open(h.filePath)
+  reader := bufio.NewReader(file)
+
+  frontends := newFrontendAggregate(func()Node {
+    return newNamedAggregate(map[string]Node {
+      "global": newNamedAggregate(map[string]Node {
+        "all": newDefaultTerminal(),
+        "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
+      "paths": newPathAggregate(func()Node {
+        return newMethodAggregate(func() Node {
+          return newNamedAggregate(map[string]Node {
+            "all": newDefaultTerminal(),
+            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newStatisticsTerminal()})})})})})})
+
+  node := newNamedAggregate(map[string]Node {
+                "global": newNamedAggregate(map[string]Node {
+                  "all": newDefaultTerminal(),
+                  "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
+                "frontends": frontends})
+  i := 0
+
+  for {
+    i++
+    line, err := reader.ReadString('\n')
+    if err == io.EOF {
+      break
+    } else {
+      processLine(line, node)
+    }
+  }
+  b, _ := json.MarshalIndent(node.Collect(), "", "  ")
+  fmt.Print(string(b) + "\n")
+}
+
+func processLine(line string, node Node) {
+  defer func() {
+    if x := recover(); x != nil {
+      //fmt.Println("panic")
+      //fmt.Println(line)
+    }
+  }()
+  processLinePCRE(line, node)
+}
+
+func processLineNative(line string, node Node) {
+  match := LineRegex.FindStringSubmatch(line)
+  if match != nil {
+    ld := LineData(match)
+    ld.day()
+    //node.Update(ld)
+  } else {
+    //fmt.Println("didn't match:")
+    //fmt.Println(line)
+  }
+}
+
+func processLinePCRE(line string, node Node) {
+  if matcher := LineRegexPCRE.MatcherString(line, 0); matcher != nil {
+    ld := LineDataPCRE(*matcher)
+    node.Update(&ld)
+  }
 }
 
 func main() {
