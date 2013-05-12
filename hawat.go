@@ -286,7 +286,6 @@ type ConcurrencyTerminal struct {
   liveRequests   map[time.Time]int
 }
 
-
 // NamedAggregate
 
 func newNamedAggregate(_children map[string]Node) *NamedAggregate {
@@ -611,6 +610,8 @@ func usage() {
 
 func main() {
   var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+  var memprofile = flag.String("memprofile", "", "write memory profile to this file")
+
   flag.Parse()
   if *cpuprofile != "" {
     fmt.Println("profiling")
@@ -627,7 +628,20 @@ func main() {
   } else {
     path := flag.Args()[0]
     h := newHawat(path)
-    h.process()
+
+    if *memprofile != "" {
+      f, err := os.Create(*memprofile)
+      if err != nil {
+        fmt.Println(err)
+      }
+      h.process()
+      pprof.WriteHeapProfile(f)
+      f.Close()
+      return
+    } else {
+      h.process()
+    }
+
   }
 }
 
