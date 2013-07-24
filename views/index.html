@@ -4,12 +4,29 @@
     <script type="text/javascript" src="https://www.google.com/jsapi"></script>
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js" type="text/javascript"></script>
 
+    <style>a { cursor: hand; }</style>
     <script>
 
       var Hawat = {
         databoxes: {},
         currentDataboxName: null,
         chart: null,
+
+        numericDisplay: function(value, units) {
+          if (units == "ms" && value > 1000) {
+            value = Math.round(value / 100)/10
+            units = "s"
+          } else if (units == "") {
+            if (value > 1000 && value < 1000000) {
+              value = Math.round(value / 100)/10
+              units = "k"
+            } else if (value > 1000000) {
+              value = Math.round(value / 10000)/100
+              units = "m"
+            }
+          }
+          return [value, units];
+        },
 
         displayDatabox: function(name) {
           console.log("displayDatabox("+name+")")
@@ -30,12 +47,9 @@
               var id = box["bind"]
               var value = box["value"]
               var units = box["units"]
-              if (units == "ms" && value > 1000) {
-                value = Math.round(value / 100)/10
-                units = "s"
-              }
-              $("#" + id + " .number .value").html(value)
-              $("#" + id + " .number .units").html(units)
+              var bits = Hawat.numericDisplay(value, units)
+              $("#" + id + " .number .value").html(bits[0])
+              $("#" + id + " .number .units").html(bits[1])
             })
 
             var tbody = $($("table tbody")[1])
@@ -46,8 +60,11 @@
                 $(row).each(function(i, column) {
                   var tag = "<td"
                   if (column.style) {
-                    tag = tag + " style=\"" + column.style + "\""
+                    var style = column.style + "; text-align:right;"
+                  } else {
+                    var style = "text-align:right;"
                   }
+                  tag = tag + " style=\"" + style + "\""
                   tag = tag + ">"
 
                   if (column.showDatabox) {

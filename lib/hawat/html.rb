@@ -1,3 +1,4 @@
+require 'andand'
 
 class Hawat
   class Html
@@ -15,7 +16,7 @@ class Hawat
         ["errors",        "Errors",          proc {|d| error_count(d["stats"]["status"]) }],
         ["mean-duration", "Mean Latency",    proc {|d| d["stats"]["duration"]["mean"] }   ],
         ["max-duration",  "Max Latency",     proc {|d| d["stats"]["duration"]["max"] }    ],
-        ["max-conc",      "Max Concurrency", proc {|d| d["conc"]["max"] }                 ],
+        ["max-conc",      "Max Concurrency", proc {|d| d["conc"].andand["max"] }                 ],
       ].each do |bind, sub_title, fetch|
         result["charts"][bind] = stats_time_series("#{title} #{sub_title}", data["series"], reach_in: fetch)
       end
@@ -29,7 +30,7 @@ class Hawat
         [error_count(stats["stats"]["status"]),  "bigstat-errors", ""],
         [stats["stats"]["duration"]["mean"], "bigstat-mean-duration", "ms"],
         [stats["stats"]["duration"]["max"],  "bigstat-max-duration", "ms"],
-        [stats["conc"]["max"],               "bigstat-max-conc", ""],
+        [stats["conc"].andand["max"],               "bigstat-max-conc", ""],
       ].each do |value, title, units|
         result << {bind: title, value: value, units: units}
       end
@@ -37,7 +38,7 @@ class Hawat
     end
 
     def error_count(status_counts)
-      status_counts.inject(0) {|m,(s,c)| (s !~ /^2/ && s != "404") ? m + c : m }
+      status_counts.inject(0) {|m,(s,c)| (s !~ /^[32]/ && s != "404") ? m + c : m }
     end
 
     def stats_time_series(title, buckets, reach_in: proc {|d| d})
@@ -63,7 +64,7 @@ class Hawat
           data["stats"]["duration"]["mean"],
           data["stats"]["duration"]["min"],
           data["stats"]["duration"]["max"],
-          data["conc"]["max"]
+          data["conc"].andand["max"]
         ].each do |cell|
           row << {content: cell}
         end

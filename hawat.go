@@ -53,8 +53,8 @@ type Line interface {
   bytes() string
   terminationState() string
   actconn() string
-  feconn() string
-  beconn() string
+  feconn() int
+  beconn() int
   srvConn() string
   retries() string
   srvQueue() string
@@ -92,8 +92,8 @@ func (md *LineDataPCRE) status() string { return md.GroupString(18) }
 func (md *LineDataPCRE) bytes() string { return md.GroupString(19) }
 func (md *LineDataPCRE) terminationState() string { return md.GroupString(20) }
 func (md *LineDataPCRE) actconn() string { return md.GroupString(21) }
-func (md *LineDataPCRE) feconn() string { return md.GroupString(22) }
-func (md *LineDataPCRE) beconn() string { return md.GroupString(23) }
+func (md *LineDataPCRE) feconn() int { i, _ := strconv.Atoi(md.GroupString(22)); return i }
+func (md *LineDataPCRE) beconn() int { i, _ := strconv.Atoi(md.GroupString(23)); return i }
 func (md *LineDataPCRE) srvConn() string { return md.GroupString(24) }
 func (md *LineDataPCRE) retries() string { return md.GroupString(25) }
 func (md *LineDataPCRE) srvQueue() string { return md.GroupString(26) }
@@ -134,8 +134,8 @@ func (md LineData) status() string { return md[18] }
 func (md LineData) bytes() string { return md[19] }
 func (md LineData) terminationState() string { return md[20] }
 func (md LineData) actconn() string { return md[21] }
-func (md LineData) feconn() string { return md[22] }
-func (md LineData) beconn() string { return md[23] }
+func (md LineData) feconn() int { i, _ := strconv.Atoi(md[22]); return i }
+func (md LineData) beconn() int { i, _ := strconv.Atoi(md[23]); return i }
 func (md LineData) srvConn() string { return md[24] }
 func (md LineData) retries() string { return md[25] }
 func (md LineData) srvQueue() string { return md[26] }
@@ -205,7 +205,6 @@ type StatisticsTerminal struct {
 
 type ConcurrencyTerminal struct {
   maxConcurrency   int
-  liveRequests     map[int]int
 }
 
 // NamedAggregate
@@ -493,26 +492,15 @@ func (n *StatisticsTerminal) Merge(otherNode Node) {
 // ConcurrencyTerminal
 
 func newConcurrencyTerminal() *ConcurrencyTerminal {
-  return &ConcurrencyTerminal{0, make(map[int]int)}
+  //return &ConcurrencyTerminal{0, make(map[int]int)}
+  return &ConcurrencyTerminal{0}
 }
 
 func (n *ConcurrencyTerminal) Children() map[string]Node { return nil }
 
 func (n *ConcurrencyTerminal) Update(l Line) {
-  accepted := int(l.Accepted().UnixNano()/1000000)
-  closed   := int(l.Closed().UnixNano()/1000000)
-
-  conc := 0
-  for t, count := range(n.liveRequests) {
-    if t > closed {
-      delete(n.liveRequests, t)
-    } else {
-      conc += count
-    }
-  }
-  n.liveRequests[accepted]++
-  if conc > n.maxConcurrency {
-    n.maxConcurrency = conc
+  if l.feconn() > n.maxConcurrency {
+    n.maxConcurrency = l.feconn()
   }
 }
 
@@ -526,6 +514,7 @@ func (n *ConcurrencyTerminal) Merge(otherNode Node) {
     n.maxConcurrency = other.maxConcurrency
   }
 }
+
 func usage() {
   fmt.Printf("usage: hawat LOG_FILE\n")
 }
@@ -542,7 +531,13 @@ func newDefaultTerminal() *NamedAggregate {
          })
 }
 
-const TimeBucketLength = 300
+func newStatsNamedTerminal() *NamedAggregate {
+  return newNamedAggregate(map[string]Node {
+            "stats": newStatisticsTerminal(),
+         })
+}
+
+const TimeBucketLength = 600
 
 func (h *Hawat) process() {
   file, _ := os.Open(h.filePath)
@@ -556,13 +551,13 @@ func (h *Hawat) process() {
       "paths": newPathAggregate(func()Node {
         return newMethodAggregate(func() Node {
           return newNamedAggregate(map[string]Node {
-            "all": newDefaultTerminal(),
-            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal()})})})})})})
+            "all": newStatsNamedTerminal(),
+            "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newStatsNamedTerminal()})})})})})})
 
   node := newNamedAggregate(map[string]Node {
                 "global": newNamedAggregate(map[string]Node {
-                  "all": newDefaultTerminal(),
-                  "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newDefaultTerminal() })}),
+                  "all": newStatsNamedTerminal(),
+                  "series": newTimeBucketerAggregate(TimeBucketLength, func()Node { return newStatsNamedTerminal() })}),
                 "frontends": frontends})
   i := 0
 
